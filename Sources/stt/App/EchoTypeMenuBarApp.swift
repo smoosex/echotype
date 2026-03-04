@@ -44,7 +44,7 @@ struct EchoTypeMenuBarApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        WindowGroup(L10n.text(L10nKey.menuSettings, language: model.currentLanguage), id: "settings") {
+        Window(L10n.text(L10nKey.menuSettings, language: model.currentLanguage), id: "settings") {
             SettingsView(
                 stateStore: model.stateStore,
                 configurationStore: model.whisperConfigurationStore,
