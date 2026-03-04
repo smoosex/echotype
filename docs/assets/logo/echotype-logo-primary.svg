@@ -1,0 +1,35 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="128" y1="128" x2="896" y2="896" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1B2B"/>
+      <stop offset="1" stop-color="#0E4D53"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(512 328) rotate(90) scale(380)">
+      <stop stop-color="#5EEAD4" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#5EEAD4" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bubble" x1="238" y1="258" x2="782" y2="770" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#DDF7F2"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="360" y1="406" x2="664" y2="598" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1B2B"/>
+      <stop offset="1" stop-color="#0E4D53"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="64" y="64" width="896" height="896" rx="220" fill="url(#bg)"/>
+  <rect x="64" y="64" width="896" height="896" rx="220" fill="url(#glow)"/>
+
+  <path d="M312 238H712C762.811 238 804 279.189 804 330V566C804 616.811 762.811 658 712 658H532L435 764V658H312C261.189 658 220 616.811 220 566V330C220 279.189 261.189 238 312 238Z" fill="url(#bubble)"/>
+
+  <rect x="332" y="412" width="52" height="178" rx="26" fill="url(#wave)"/>
+  <rect x="406" y="370" width="52" height="220" rx="26" fill="url(#wave)"/>
+  <rect x="480" y="332" width="52" height="258" rx="26" fill="url(#wave)"/>
+  <rect x="554" y="370" width="52" height="220" rx="26" fill="url(#wave)"/>
+  <rect x="628" y="412" width="52" height="178" rx="26" fill="url(#wave)"/>
+
+  <rect x="282" y="742" width="460" height="40" rx="20" fill="#D1FAE5" fill-opacity="0.90"/>
+  <rect x="282" y="798" width="350" height="40" rx="20" fill="#CCFBF1" fill-opacity="0.75"/>
+  <rect x="650" y="798" width="24" height="40" rx="8" fill="#5EEAD4"/>
+</svg>
