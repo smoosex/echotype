@@ -9,17 +9,31 @@ struct RecordingOverlayView: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
             let timeline = context.date.timeIntervalSinceReferenceDate
-            let progress = presentationProgress
+            let widthProgress = horizontalProgress
+            let heightProgress = verticalProgress
+            let baseVisibilityProgress = baseProgress
             let level = smoothedLevel
             let notchWidth = RecordingOverlayMetrics.resolvedNotchWidth(levelStore.notchWidth)
             let notchHeight = RecordingOverlayMetrics.resolvedNotchHeight(levelStore.notchHeight)
             let finalWidth = RecordingOverlayMetrics.finalWidth(notchWidth: notchWidth)
             let finalHeight = RecordingOverlayMetrics.finalHeight(notchHeight: notchHeight)
-            let currentWidth = RecordingOverlayMetrics.panelWidth(progress: progress, notchWidth: notchWidth)
-            let currentHeight = RecordingOverlayMetrics.panelHeight(progress: progress, notchHeight: notchHeight)
-            let notchMaskWidth = RecordingOverlayMetrics.notchMaskWidth(progress: progress, notchWidth: notchWidth)
+            let currentWidth = RecordingOverlayMetrics.panelWidth(
+                baseVisibilityProgress: baseVisibilityProgress,
+                widthProgress: widthProgress,
+                notchWidth: notchWidth
+            )
+            let currentHeight = RecordingOverlayMetrics.panelHeight(
+                baseVisibilityProgress: baseVisibilityProgress,
+                heightProgress: heightProgress,
+                notchHeight: notchHeight
+            )
+            let notchMaskWidth = RecordingOverlayMetrics.notchMaskWidth(
+                baseVisibilityProgress: baseVisibilityProgress,
+                notchWidth: notchWidth
+            )
             let notchMaskHeight = RecordingOverlayMetrics.notchMaskHeight(
-                progress: progress,
+                baseVisibilityProgress: baseVisibilityProgress,
+                heightProgress: heightProgress,
                 notchHeight: notchHeight,
                 panelHeight: currentHeight
             )
@@ -29,7 +43,8 @@ struct RecordingOverlayView: View {
                 contentHeight: contentHeight
             )
             let contentVisibility = RecordingOverlayMetrics.contentVisibility(
-                progress: progress,
+                widthProgress: widthProgress,
+                heightProgress: heightProgress,
                 currentHeight: currentHeight,
                 notchHeight: notchHeight,
                 contentHeight: contentHeight
@@ -109,8 +124,16 @@ struct RecordingOverlayView: View {
         .accessibilityHidden(true)
     }
 
-    private var presentationProgress: CGFloat {
-        max(0, min(1, levelStore.presentationProgress))
+    private var horizontalProgress: CGFloat {
+        max(0, min(1, levelStore.widthProgress))
+    }
+
+    private var verticalProgress: CGFloat {
+        max(0, min(1, levelStore.heightProgress))
+    }
+
+    private var baseProgress: CGFloat {
+        max(0, min(1, levelStore.baseVisibilityProgress))
     }
 
     private var smoothedLevel: CGFloat {
@@ -142,7 +165,7 @@ struct RecordingOverlayView: View {
 enum RecordingOverlayMetrics {
     static let fallbackNotchWidth: CGFloat = 172.5
     static let fallbackNotchHeight: CGFloat = 37
-    static let horizontalExpansion: CGFloat = 44
+    static let horizontalExpansion: CGFloat = 12
     static let minimumHeight: CGFloat = 70
     static let extraHeight: CGFloat = 33
     static let topCornerRadius: CGFloat = 6
@@ -150,7 +173,7 @@ enum RecordingOverlayMetrics {
     static let notchBottomCornerRadius: CGFloat = 14
     static let contentTopSpacing: CGFloat = 4
     static let contentBottomInset: CGFloat = 6
-    static let contentRevealProgressThreshold: CGFloat = 0.44
+    static let contentRevealProgressThreshold: CGFloat = 0.08
 
     static func resolvedNotchWidth(_ width: CGFloat) -> CGFloat {
         width > 0 ? width : fallbackNotchWidth
@@ -170,23 +193,40 @@ enum RecordingOverlayMetrics {
 
     static func easedProgress(_ progress: CGFloat) -> CGFloat {
         let value = max(0, min(1, progress))
-        return value * value * (3 - 2 * value)
+        let inverse = 1 - value
+        return 1 - inverse * inverse * inverse
     }
 
-    static func panelWidth(progress: CGFloat, notchWidth: CGFloat) -> CGFloat {
-        finalWidth(notchWidth: notchWidth) * easedProgress(progress)
+    static func panelWidth(baseVisibilityProgress: CGFloat, widthProgress: CGFloat, notchWidth: CGFloat) -> CGFloat {
+        let baseProgress = easedProgress(baseVisibilityProgress)
+        let progress = easedProgress(widthProgress)
+        guard baseProgress > 0 else { return 0 }
+        return notchWidth * baseProgress + horizontalExpansion * progress
     }
 
-    static func panelHeight(progress: CGFloat, notchHeight: CGFloat) -> CGFloat {
-        finalHeight(notchHeight: notchHeight) * easedProgress(progress)
+    static func panelHeight(baseVisibilityProgress: CGFloat, heightProgress: CGFloat, notchHeight: CGFloat) -> CGFloat {
+        let baseProgress = easedProgress(baseVisibilityProgress)
+        let progress = easedProgress(heightProgress)
+        guard baseProgress > 0 else { return 0 }
+        return notchHeight * baseProgress + max(finalHeight(notchHeight: notchHeight) - notchHeight, 0) * progress
     }
 
-    static func notchMaskWidth(progress: CGFloat, notchWidth: CGFloat) -> CGFloat {
-        notchWidth * easedProgress(progress)
+    static func notchMaskWidth(baseVisibilityProgress: CGFloat, notchWidth: CGFloat) -> CGFloat {
+        let baseProgress = easedProgress(baseVisibilityProgress)
+        guard baseProgress > 0 else { return 0 }
+        return notchWidth * baseProgress
     }
 
-    static func notchMaskHeight(progress: CGFloat, notchHeight: CGFloat, panelHeight: CGFloat) -> CGFloat {
-        min(panelHeight, notchHeight * easedProgress(progress))
+    static func notchMaskHeight(
+        baseVisibilityProgress: CGFloat,
+        heightProgress: CGFloat,
+        notchHeight: CGFloat,
+        panelHeight: CGFloat
+    ) -> CGFloat {
+        let baseProgress = easedProgress(baseVisibilityProgress)
+        let progress = easedProgress(heightProgress)
+        guard baseProgress > 0 || progress > 0 else { return 0 }
+        return min(panelHeight, notchHeight * baseProgress)
     }
 
     static func contentTopInset(
@@ -200,15 +240,17 @@ enum RecordingOverlayMetrics {
     }
 
     static func contentVisibility(
-        progress: CGFloat,
+        widthProgress: CGFloat,
+        heightProgress: CGFloat,
         currentHeight: CGFloat,
         notchHeight: CGFloat,
         contentHeight: CGFloat
     ) -> CGFloat {
-        let eased = easedProgress(progress)
+        let widthVisibility = easedProgress(widthProgress)
+        let heightVisibility = easedProgress(heightProgress)
         let progressVisibility = max(
             0,
-            min(1, (eased - contentRevealProgressThreshold) / 0.12)
+            min(1, (min(widthVisibility, heightVisibility) - contentRevealProgressThreshold) / 0.12)
         )
         let availableHeight = currentHeight - contentBottomInset - (notchHeight + contentTopSpacing)
         let spaceVisibility = max(0, min(1, (availableHeight - contentHeight) / 4))
@@ -278,7 +320,9 @@ enum RecordingOverlayPresentationPhase {
 @MainActor
 final class RecordingOverlayLevelStore: ObservableObject {
     @Published var level: Double = 0
-    @Published var presentationProgress: CGFloat = 0
+    @Published var baseVisibilityProgress: CGFloat = 0
+    @Published var widthProgress: CGFloat = 0
+    @Published var heightProgress: CGFloat = 0
     @Published var presentationPhase: RecordingOverlayPresentationPhase = .hidden
     @Published var notchWidth: CGFloat = RecordingOverlayMetrics.fallbackNotchWidth
     @Published var notchHeight: CGFloat = RecordingOverlayMetrics.fallbackNotchHeight

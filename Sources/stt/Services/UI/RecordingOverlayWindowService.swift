@@ -4,8 +4,10 @@ import SwiftUI
 
 @MainActor
 final class RecordingOverlayWindowService {
-    private let showDuration: Duration = .milliseconds(220)
-    private let hideDuration: Duration = .milliseconds(160)
+    private let baseHideDuration: Duration = .milliseconds(150)
+    private let heightShowDuration: Duration = .milliseconds(240)
+    private let heightHideDuration: Duration = .milliseconds(240)
+    private let widthHideDuration: Duration = .milliseconds(160)
     private let levelStore = RecordingOverlayLevelStore()
 
     private weak var panel: RecordingOverlayPanel?
@@ -19,7 +21,6 @@ final class RecordingOverlayWindowService {
         hideTask = nil
         phaseTask?.cancel()
         phaseTask = nil
-        let showDuration = self.showDuration
 
         let panel = ensurePanel()
         reposition(panel)
@@ -27,14 +28,22 @@ final class RecordingOverlayWindowService {
         panel.alphaValue = 1
         panel.orderFrontRegardless()
         levelStore.presentationPhase = .appearing
+        levelStore.baseVisibilityProgress = 1
+        levelStore.widthProgress = 0
+        levelStore.heightProgress = 0
 
-        withAnimation(.easeOut(duration: 0.22)) {
-            levelStore.presentationProgress = 1
+        withAnimation(.easeOut(duration: 0.18)) {
+            levelStore.widthProgress = 1
+        }
+        withAnimation(.easeOut(duration: 0.24)) {
+            levelStore.heightProgress = 1
         }
 
         phaseTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: showDuration)
-            guard let self, !Task.isCancelled else { return }
+            guard let self else { return }
+
+            try? await Task.sleep(for: self.heightShowDuration)
+            guard !Task.isCancelled else { return }
             self.levelStore.presentationPhase = .visible
         }
     }
@@ -44,26 +53,42 @@ final class RecordingOverlayWindowService {
         phaseTask?.cancel()
         phaseTask = nil
         hideTask?.cancel()
-        let hideDuration = self.hideDuration
 
         guard panel != nil else {
             levelStore.presentationPhase = .hidden
-            levelStore.presentationProgress = 0
+            levelStore.baseVisibilityProgress = 0
+            levelStore.widthProgress = 0
+            levelStore.heightProgress = 0
             return
         }
 
         levelStore.presentationPhase = .disappearing
-        withAnimation(.easeIn(duration: 0.16)) {
-            levelStore.presentationProgress = 0
+        withAnimation(.easeOut(duration: 0.16)) {
+            levelStore.widthProgress = 0
+        }
+        withAnimation(.easeOut(duration: 0.24)) {
+            levelStore.heightProgress = 0
         }
 
         hideTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: hideDuration)
-            guard let self, !Task.isCancelled else { return }
+            guard let self else { return }
+
+            try? await Task.sleep(for: self.heightHideDuration)
+            guard !Task.isCancelled else { return }
+
+            withAnimation(.easeOut(duration: 0.15)) {
+                self.levelStore.baseVisibilityProgress = 0
+            }
+
+            try? await Task.sleep(for: self.baseHideDuration)
+            guard !Task.isCancelled else { return }
+
             self.panel?.orderOut(nil)
             self.unregisterObservers()
             self.levelStore.presentationPhase = .hidden
-            self.levelStore.presentationProgress = 0
+            self.levelStore.baseVisibilityProgress = 0
+            self.levelStore.widthProgress = 0
+            self.levelStore.heightProgress = 0
             self.hideTask = nil
         }
     }
@@ -184,7 +209,7 @@ final class RecordingOverlayWindowService {
         if let leftInset = screen.auxiliaryTopLeftArea?.width,
            let rightInset = screen.auxiliaryTopRightArea?.width
         {
-            notchWidth = screen.frame.width - leftInset - rightInset + 4
+            notchWidth = screen.frame.width - leftInset - rightInset + 12
         } else {
             notchWidth = RecordingOverlayMetrics.fallbackNotchWidth
         }
