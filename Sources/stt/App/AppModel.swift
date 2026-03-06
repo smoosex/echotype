@@ -27,6 +27,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var performanceSummary: String
     @Published private(set) var metricsDirectoryPath: String
     @Published private(set) var selfTestSummary: String
+    @Published private(set) var recordingLevel: Double = 0
 
     private let hotkeyService = HotkeyService()
     private let audioService = AudioService()
@@ -34,6 +35,7 @@ final class AppModel: ObservableObject {
     private let textInjectionService = TextInjectionService()
     private let permissionService = PermissionService()
     private let onboardingWindowService = OnboardingWindowService()
+    private let recordingOverlayWindowService = RecordingOverlayWindowService()
     private let processMetricsSampler = ProcessMetricsSampler()
     private let performanceReportService = PerformanceReportService()
     private let stabilitySelfTestService = StabilitySelfTestService()
@@ -74,6 +76,7 @@ final class AppModel: ObservableObject {
         onboardingDontShowAgainSelection = onboardingCompleted
         metricsDirectoryPath = performanceReportService.metricsDirectoryPath()
         bindLanguageChanges()
+        bindRecordingLevelChanges()
         refreshPermissionStates()
         refreshPerformanceSummary()
         configureHotkey()
@@ -94,6 +97,17 @@ final class AppModel: ObservableObject {
                 refreshPerformanceSummary()
                 applyHotkeyPresentation(shortcut: lastKnownShortcut, enabled: hotkeyEnabled)
                 refreshOnboardingWindowIfNeeded()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func bindRecordingLevelChanges() {
+        audioService.recordingLevelPublisher
+            .removeDuplicates(by: { abs($0 - $1) < 0.01 })
+            .sink { [weak self] level in
+                guard let self else { return }
+                recordingLevel = level
+                recordingOverlayWindowService.updateLevel(level)
             }
             .store(in: &cancellables)
     }
@@ -388,8 +402,10 @@ final class AppModel: ObservableObject {
         do {
             try audioService.startRecording()
             stateStore.startRecording()
+            showRecordingOverlay()
             AppLogger.audio.info("Recording started")
         } catch {
+            hideRecordingOverlay()
             stateStore.fail(error.localizedDescription)
             AppLogger.audio.error("Recording start failed: \(error.localizedDescription)")
         }
@@ -451,6 +467,7 @@ final class AppModel: ObservableObject {
     }
 
     private func stopRecordingFlow() {
+        hideRecordingOverlay()
         lastTranscription = nil
         transcriptionHintState = .processing
         transcriptionHint = localizedTranscriptionHint()
@@ -481,9 +498,20 @@ final class AppModel: ObservableObject {
                 return
             }
         } catch {
+            hideRecordingOverlay()
             stateStore.fail(error.localizedDescription)
             AppLogger.audio.error("Recording stop failed: \(error.localizedDescription)")
         }
+    }
+
+    private func showRecordingOverlay() {
+        recordingOverlayWindowService.show()
+        recordingOverlayWindowService.updateLevel(recordingLevel)
+    }
+
+    private func hideRecordingOverlay() {
+        recordingOverlayWindowService.hide()
+        recordingLevel = 0
     }
 
     private func runTranscription(

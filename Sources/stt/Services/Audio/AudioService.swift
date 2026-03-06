@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import Combine
 import Foundation
 
 enum AudioServiceError: LocalizedError {
@@ -33,10 +34,23 @@ enum AudioServiceError: LocalizedError {
 final class AudioService: @unchecked Sendable {
     private let audioEngine = AVAudioEngine()
     private let bufferLock = NSLock()
+    private let levelLock = NSLock()
+    private let recordingLevelSubject = CurrentValueSubject<Double, Never>(0)
+    private let levelFloor: Float = 0.000_32
+    private let minimumDecibels: Float = -50
+    private let attackSmoothing: Float = 0.42
+    private let releaseSmoothing: Float = 0.12
+    private let levelEmissionInterval: TimeInterval = 1.0 / 30.0
 
     private var capturedBuffers: [AVAudioPCMBuffer] = []
     private var inputFormat: AVAudioFormat?
+    private var smoothedLevel: Float = 0
+    private var lastLevelEmissionUptime: TimeInterval = 0
     private(set) var isRecording = false
+    
+    var recordingLevelPublisher: AnyPublisher<Double, Never> {
+        recordingLevelSubject.eraseToAnyPublisher()
+    }
 
     func startRecording() throws {
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
@@ -52,6 +66,7 @@ final class AudioService: @unchecked Sendable {
         inputFormat = sourceFormat
 
         capturedBuffers.removeAll(keepingCapacity: true)
+        resetLevelMeter()
 
         inputNode.installTap(onBus: 0, bufferSize: 2048, format: sourceFormat) { [weak self] buffer, _ in
             guard let self else { return }
@@ -59,11 +74,22 @@ final class AudioService: @unchecked Sendable {
             self.bufferLock.lock()
             self.capturedBuffers.append(copy)
             self.bufferLock.unlock()
+            self.processMeterLevel(from: buffer)
         }
 
-        audioEngine.prepare()
-        try audioEngine.start()
-        isRecording = true
+        do {
+            audioEngine.prepare()
+            try audioEngine.start()
+            isRecording = true
+        } catch {
+            inputNode.removeTap(onBus: 0)
+            inputFormat = nil
+            bufferLock.lock()
+            capturedBuffers.removeAll(keepingCapacity: false)
+            bufferLock.unlock()
+            resetLevelMeter()
+            throw error
+        }
     }
 
     func stopRecording() throws -> URL {
@@ -75,6 +101,7 @@ final class AudioService: @unchecked Sendable {
         inputNode.removeTap(onBus: 0)
         audioEngine.stop()
         isRecording = false
+        resetLevelMeter()
 
         var buffers: [AVAudioPCMBuffer] = []
         bufferLock.lock()
@@ -167,6 +194,146 @@ final class AudioService: @unchecked Sendable {
                 return
             }
         }
+    }
+
+    private func processMeterLevel(from buffer: AVAudioPCMBuffer) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let measuredLevel = normalizedLevel(from: buffer)
+        var emittedLevel: Double?
+
+        levelLock.lock()
+        let smoothing = measuredLevel > smoothedLevel ? attackSmoothing : releaseSmoothing
+        smoothedLevel += (measuredLevel - smoothedLevel) * smoothing
+        if now - lastLevelEmissionUptime >= levelEmissionInterval {
+            lastLevelEmissionUptime = now
+            emittedLevel = Double(smoothedLevel)
+        }
+        levelLock.unlock()
+
+        guard let emittedLevel else { return }
+        publishRecordingLevel(emittedLevel)
+    }
+
+    private func resetLevelMeter() {
+        levelLock.lock()
+        smoothedLevel = 0
+        lastLevelEmissionUptime = 0
+        levelLock.unlock()
+        publishRecordingLevel(0)
+    }
+
+    private func publishRecordingLevel(_ level: Double) {
+        let clampedLevel = min(max(level, 0), 1)
+        DispatchQueue.main.async { [recordingLevelSubject] in
+            recordingLevelSubject.send(clampedLevel)
+        }
+    }
+
+    private func normalizedLevel(from buffer: AVAudioPCMBuffer) -> Float {
+        guard buffer.frameLength > 0 else {
+            return 0
+        }
+
+        let rms: Float
+        switch buffer.format.commonFormat {
+        case .pcmFormatFloat32:
+            rms = rootMeanSquare(
+                channelData: buffer.floatChannelData,
+                channelCount: Int(buffer.format.channelCount),
+                frameLength: Int(buffer.frameLength)
+            )
+        case .pcmFormatInt16:
+            rms = rootMeanSquare(
+                channelData: buffer.int16ChannelData,
+                channelCount: Int(buffer.format.channelCount),
+                frameLength: Int(buffer.frameLength),
+                scale: Float(Int16.max)
+            )
+        case .pcmFormatInt32:
+            rms = rootMeanSquare(
+                channelData: buffer.int32ChannelData,
+                channelCount: Int(buffer.format.channelCount),
+                frameLength: Int(buffer.frameLength),
+                scale: Float(Int32.max)
+            )
+        default:
+            return 0
+        }
+
+        guard rms > 0 else {
+            return 0
+        }
+
+        let decibels = max(minimumDecibels, 20 * log10(max(rms, levelFloor)))
+        return (decibels - minimumDecibels) / abs(minimumDecibels)
+    }
+
+    private func rootMeanSquare(
+        channelData: UnsafePointer<UnsafeMutablePointer<Float>>?,
+        channelCount: Int,
+        frameLength: Int
+    ) -> Float {
+        guard let channelData, channelCount > 0, frameLength > 0 else {
+            return 0
+        }
+
+        var total: Float = 0
+        for channel in 0..<channelCount {
+            let samples = channelData[channel]
+            var sum: Float = 0
+            for frame in 0..<frameLength {
+                let sample = samples[frame]
+                sum += sample * sample
+            }
+            total += sqrt(sum / Float(frameLength))
+        }
+        return total / Float(channelCount)
+    }
+
+    private func rootMeanSquare(
+        channelData: UnsafePointer<UnsafeMutablePointer<Int16>>?,
+        channelCount: Int,
+        frameLength: Int,
+        scale: Float
+    ) -> Float {
+        guard let channelData, channelCount > 0, frameLength > 0 else {
+            return 0
+        }
+
+        var total: Float = 0
+        for channel in 0..<channelCount {
+            let samples = channelData[channel]
+            var sum: Float = 0
+            for frame in 0..<frameLength {
+                let sample = Float(samples[frame]) / scale
+                sum += sample * sample
+            }
+            total += sqrt(sum / Float(frameLength))
+        }
+        return total / Float(channelCount)
+    }
+
+    private func rootMeanSquare(
+        channelData: UnsafePointer<UnsafeMutablePointer<Int32>>?,
+        channelCount: Int,
+        frameLength: Int,
+        scale: Float
+    ) -> Float {
+        guard let channelData, channelCount > 0, frameLength > 0 else {
+            return 0
+        }
+
+        var total: Float = 0
+        for channel in 0..<channelCount {
+            let samples = channelData[channel]
+            var sum: Float = 0
+            for frame in 0..<frameLength {
+                let sample = Float(samples[frame]) / scale
+                sum += sample * sample
+            }
+            total += sqrt(sum / Float(frameLength))
+        }
+        return total / Float(channelCount)
     }
 }
 
