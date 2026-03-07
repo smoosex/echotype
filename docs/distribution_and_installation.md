@@ -52,7 +52,7 @@ scripts/package.sh \
 ```bash
 scripts/release.sh \
   --version 1.0.0 \
-  --repo smoosex/echo-type \
+  --repo smoosex/echotype \
   --tap-repo smoosex/homebrew-tap
 ```
 

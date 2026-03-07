@@ -8,7 +8,7 @@ Usage:
 
 Options:
   --version <version>          Release version, e.g. 1.0.0 (required)
-  --repo <owner/repo>          GitHub repository, e.g. smoosex/echo-type (required)
+  --repo <owner/repo>          GitHub repository, e.g. smoosex/echotype (required)
   --tag-prefix <prefix>        Release tag prefix (default: v)
   --dist-dir <path>            Local dist directory (default: dist)
   --app-name <name>            App display name (default: EchoType)
@@ -37,45 +37,45 @@ SKIP_TAP=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --version)
-      VERSION="${2:-}"
-      shift 2
-      ;;
-    --repo)
-      REPO="${2:-}"
-      shift 2
-      ;;
-    --tag-prefix)
-      TAG_PREFIX="${2:-}"
-      shift 2
-      ;;
-    --dist-dir)
-      DIST_DIR="${2:-}"
-      shift 2
-      ;;
-    --app-name)
-      APP_NAME="${2:-}"
-      shift 2
-      ;;
-    --token)
-      TOKEN="${2:-}"
-      shift 2
-      ;;
-    --tap-repo)
-      TAP_REPO="${2:-}"
-      shift 2
-      ;;
-    --skip-tap)
-      SKIP_TAP=true
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      die "Unknown argument: $1"
-      ;;
+  --version)
+    VERSION="${2:-}"
+    shift 2
+    ;;
+  --repo)
+    REPO="${2:-}"
+    shift 2
+    ;;
+  --tag-prefix)
+    TAG_PREFIX="${2:-}"
+    shift 2
+    ;;
+  --dist-dir)
+    DIST_DIR="${2:-}"
+    shift 2
+    ;;
+  --app-name)
+    APP_NAME="${2:-}"
+    shift 2
+    ;;
+  --token)
+    TOKEN="${2:-}"
+    shift 2
+    ;;
+  --tap-repo)
+    TAP_REPO="${2:-}"
+    shift 2
+    ;;
+  --skip-tap)
+    SKIP_TAP=true
+    shift
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    die "Unknown argument: $1"
+    ;;
   esac
 done
 
@@ -107,7 +107,7 @@ if [[ ! "${DMG_SHA256}" =~ ^[0-9a-fA-F]{64}$ ]]; then
   die "Invalid dmg checksum: ${DMG_SHA256}"
 fi
 mkdir -p "${DIST_ABS}"
-cat > "${CASK_PATH}" <<EOF
+cat >"${CASK_PATH}" <<EOF
 cask "${TOKEN}" do
   version "${VERSION}"
   sha256 "${DMG_SHA256}"
