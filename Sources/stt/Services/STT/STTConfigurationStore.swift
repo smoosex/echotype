@@ -93,6 +93,7 @@ final class STTConfigurationStore: ObservableObject {
     }
 
     private enum Keys {
+        static let legacyDefaultsDomain = "echotype"
         static let selectedModelID = "stt.selectedModelID"
         static let languageHintCode = "stt.languageHintCode"
         static let whisperModelFolders = "stt.whisperModelFolders"
@@ -112,16 +113,41 @@ final class STTConfigurationStore: ObservableObject {
 
         STTPathResolver.configureSpeechSwiftEnvironment(fileManager: fileManager)
 
+        let legacyDomain = defaults.persistentDomain(forName: Keys.legacyDefaultsDomain) ?? [:]
         let migratedSelection = STTModelOption.migratedSelection(
-            selectedModelID: defaults.string(forKey: Keys.selectedModelID),
-            legacyBackend: defaults.string(forKey: Keys.legacyBackend),
-            legacyWhisperFileName: defaults.string(forKey: Keys.legacySelectedModelFileName),
-            legacyQwenModelName: defaults.string(forKey: Keys.legacyQwenModelName)
+            selectedModelID: Self.stringValue(
+                forKey: Keys.selectedModelID,
+                currentDefaults: defaults,
+                legacyDomain: legacyDomain
+            ),
+            legacyBackend: Self.stringValue(
+                forKey: Keys.legacyBackend,
+                currentDefaults: defaults,
+                legacyDomain: legacyDomain
+            ),
+            legacyWhisperFileName: Self.stringValue(
+                forKey: Keys.legacySelectedModelFileName,
+                currentDefaults: defaults,
+                legacyDomain: legacyDomain
+            ),
+            legacyQwenModelName: Self.stringValue(
+                forKey: Keys.legacyQwenModelName,
+                currentDefaults: defaults,
+                legacyDomain: legacyDomain
+            )
         )
 
         selectedModelID = migratedSelection.rawValue
-        languageHintCode = defaults.string(forKey: Keys.languageHintCode) ?? "auto"
-        whisperModelFolders = defaults.dictionary(forKey: Keys.whisperModelFolders) as? [String: String] ?? [:]
+        languageHintCode = Self.stringValue(
+            forKey: Keys.languageHintCode,
+            currentDefaults: defaults,
+            legacyDomain: legacyDomain
+        ) ?? "auto"
+        whisperModelFolders = Self.restoredWhisperModelFolders(
+            currentDefaults: defaults,
+            legacyDomain: legacyDomain,
+            fileManager: fileManager
+        )
 
         persist()
         advanceReadinessRevision()
@@ -431,6 +457,99 @@ final class STTConfigurationStore: ObservableObject {
         let totalText = Self.byteCountFormatter.string(fromByteCount: totalBytes)
         let prefix = operation.isEstimated ? "~" : ""
         return "\(prefix)\(downloadedText) / \(prefix)\(totalText)"
+    }
+
+    private static func stringValue(
+        forKey key: String,
+        currentDefaults: UserDefaults,
+        legacyDomain: [String: Any]
+    ) -> String? {
+        currentDefaults.string(forKey: key) ?? legacyDomain[key] as? String
+    }
+
+    private static func restoredWhisperModelFolders(
+        currentDefaults: UserDefaults,
+        legacyDomain: [String: Any],
+        fileManager: FileManager
+    ) -> [String: String] {
+        var restored: [String: String] = [:]
+
+        mergeWhisperModelFolders(
+            into: &restored,
+            folders: whisperFolderDictionary(from: currentDefaults.dictionary(forKey: Keys.whisperModelFolders)),
+            fileManager: fileManager
+        )
+
+        mergeWhisperModelFolders(
+            into: &restored,
+            folders: whisperFolderDictionary(from: legacyDomain[Keys.whisperModelFolders]),
+            fileManager: fileManager
+        )
+
+        for (modelID, path) in discoverWhisperModelFoldersOnDisk(fileManager: fileManager) {
+            restored[modelID] = restored[modelID] ?? path
+        }
+
+        return restored
+    }
+
+    private static func mergeWhisperModelFolders(
+        into restored: inout [String: String],
+        folders: [String: String],
+        fileManager: FileManager
+    ) {
+        for (rawModelID, path) in folders {
+            guard let model = STTModelOption.normalized(from: rawModelID),
+                  model.family == .whisperKit,
+                  restored[model.id] == nil,
+                  directoryExists(atPath: path, fileManager: fileManager)
+            else {
+                continue
+            }
+            restored[model.id] = path
+        }
+    }
+
+    private static func whisperFolderDictionary(from value: Any?) -> [String: String] {
+        if let typed = value as? [String: String] {
+            return typed
+        }
+        guard let raw = value as? [String: Any] else {
+            return [:]
+        }
+
+        var folders: [String: String] = [:]
+        for (key, item) in raw {
+            if let path = item as? String {
+                folders[key] = path
+            }
+        }
+        return folders
+    }
+
+    private static func discoverWhisperModelFoldersOnDisk(fileManager: FileManager) -> [String: String] {
+        guard let base = try? STTPathResolver.whisperDownloadBase(fileManager: fileManager) else {
+            return [:]
+        }
+
+        let modelsRoot = base
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent("argmaxinc", isDirectory: true)
+            .appendingPathComponent("whisperkit-coreml", isDirectory: true)
+
+        var discovered: [String: String] = [:]
+        for model in STTModelOption.allCases where model.family == .whisperKit {
+            guard let variant = model.whisperVariant else { continue }
+            let path = modelsRoot.appendingPathComponent(variant, isDirectory: true).path
+            guard directoryExists(atPath: path, fileManager: fileManager) else { continue }
+            discovered[model.id] = path
+        }
+        return discovered
+    }
+
+    private static func directoryExists(atPath path: String, fileManager: FileManager) -> Bool {
+        var isDirectory: ObjCBool = false
+        return fileManager.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
     private func installedLocation(for model: STTModelOption) -> URL? {

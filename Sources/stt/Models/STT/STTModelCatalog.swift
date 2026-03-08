@@ -189,7 +189,7 @@ enum STTModelOption: String, CaseIterable, Identifiable, Codable {
         legacyQwenModelName: String?
     ) -> STTModelOption {
         if let selectedModelID,
-           let normalized = normalizedSelection(from: selectedModelID) {
+           let normalized = normalized(from: selectedModelID) {
             return normalized
         }
 
@@ -212,7 +212,7 @@ enum STTModelOption: String, CaseIterable, Identifiable, Codable {
         return .whisperBase
     }
 
-    private static func normalizedSelection(from selectedModelID: String) -> STTModelOption? {
+    static func normalized(from selectedModelID: String) -> STTModelOption? {
         if let current = STTModelOption(rawValue: selectedModelID) {
             return current
         }
