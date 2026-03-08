@@ -37,6 +37,7 @@ enum STTEngineError: LocalizedError {
 
 actor WhisperKitRuntimeStore {
     static let shared = WhisperKitRuntimeStore()
+    private static let idleUnloadDelay: Duration = .seconds(300)
 
     private struct LoadKey: Hashable {
         let model: STTModelOption
@@ -51,6 +52,9 @@ actor WhisperKitRuntimeStore {
     private var cachedKey: LoadKey?
     private var whisperKit: WhisperKit?
     private var loadingTasks: [LoadKey: LoadingEntry] = [:]
+    private var activeUseCount = 0
+    private var idleGeneration: UInt64 = 0
+    private var idleUnloadTask: Task<Void, Never>?
 
     func preload(configuration: STTConfiguration) async throws {
         guard configuration.isModelInstalled,
@@ -58,10 +62,12 @@ actor WhisperKitRuntimeStore {
         else {
             return
         }
-        let preloadStart = Date()
-        _ = try await resolveWhisperKit(for: configuration.selectedModel, folder: folder)
-        let preloadSeconds = Self.formattedSeconds(Date().timeIntervalSince(preloadStart))
-        AppLogger.stt.info("WhisperKit preload ready for \(configuration.selectedModel.title, privacy: .public) in \(preloadSeconds, privacy: .public)s")
+        try await withActiveUse(modelTitle: configuration.selectedModel.title) {
+            let preloadStart = Date()
+            _ = try await resolveWhisperKit(for: configuration.selectedModel, folder: folder)
+            let preloadSeconds = Self.formattedSeconds(Date().timeIntervalSince(preloadStart))
+            AppLogger.stt.info("WhisperKit preload ready for \(configuration.selectedModel.title, privacy: .public) in \(preloadSeconds, privacy: .public)s")
+        }
     }
 
     func transcribe(audioURL: URL, configuration: STTConfiguration) async throws -> String {
@@ -72,24 +78,27 @@ actor WhisperKitRuntimeStore {
             throw STTEngineError.modelNotInstalled(configuration.selectedModel.title)
         }
 
-        let resolveStart = Date()
-        let pipe = try await resolveWhisperKit(for: configuration.selectedModel, folder: folder)
-        let resolveDuration = Date().timeIntervalSince(resolveStart)
-        let options = DecodingOptions(language: configuration.languageHint.whisperKitLanguageCode)
-        let transcriptionStart = Date()
-        let results = try await pipe.transcribe(audioPath: audioURL.path, decodeOptions: options)
-        let transcriptionDuration = Date().timeIntervalSince(transcriptionStart)
-        let resolveSeconds = Self.formattedSeconds(resolveDuration)
-        let decodeSeconds = Self.formattedSeconds(transcriptionDuration)
-        AppLogger.stt.info("WhisperKit transcribe model=\(configuration.selectedModel.title, privacy: .public) resolve=\(resolveSeconds, privacy: .public)s decode=\(decodeSeconds, privacy: .public)s")
-        let text = results.first?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !text.isEmpty else {
-            throw STTEngineError.outputMissing
+        return try await withActiveUse(modelTitle: configuration.selectedModel.title) {
+            let resolveStart = Date()
+            let pipe = try await resolveWhisperKit(for: configuration.selectedModel, folder: folder)
+            let resolveDuration = Date().timeIntervalSince(resolveStart)
+            let options = DecodingOptions(language: configuration.languageHint.whisperKitLanguageCode)
+            let transcriptionStart = Date()
+            let results = try await pipe.transcribe(audioPath: audioURL.path, decodeOptions: options)
+            let transcriptionDuration = Date().timeIntervalSince(transcriptionStart)
+            let resolveSeconds = Self.formattedSeconds(resolveDuration)
+            let decodeSeconds = Self.formattedSeconds(transcriptionDuration)
+            AppLogger.stt.info("WhisperKit transcribe model=\(configuration.selectedModel.title, privacy: .public) resolve=\(resolveSeconds, privacy: .public)s decode=\(decodeSeconds, privacy: .public)s")
+            let text = results.first?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !text.isEmpty else {
+                throw STTEngineError.outputMissing
+            }
+            return text
         }
-        return text
     }
 
     func invalidate(model: STTModelOption) async {
+        cancelIdleUnload(reason: "invalidate \(model.title)")
         if cachedKey?.model == model {
             if let whisperKit {
                 await whisperKit.unloadModels()
@@ -106,6 +115,7 @@ actor WhisperKitRuntimeStore {
     }
 
     func invalidateAll() async {
+        cancelIdleUnload(reason: "invalidate all Whisper runtimes")
         if let whisperKit {
             await whisperKit.unloadModels()
         }
@@ -117,6 +127,8 @@ actor WhisperKitRuntimeStore {
 
     private func resolveWhisperKit(for model: STTModelOption, folder: String) async throws -> WhisperKit {
         let key = LoadKey(model: model, folder: folder)
+
+        await Qwen3ASRRuntimeStore.shared.invalidateAll()
 
         if cachedKey == key,
            let whisperKit {
@@ -131,6 +143,7 @@ actor WhisperKitRuntimeStore {
             }
             whisperKit = nil
             cachedKey = nil
+            cancelIdleUnload(reason: "switching Whisper runtime to \(model.title)")
             AppLogger.stt.info("WhisperKit unloaded previous runtime before loading \(model.title, privacy: .public)")
         }
 
@@ -202,6 +215,74 @@ actor WhisperKitRuntimeStore {
             .appendingPathComponent("tokenizer", isDirectory: true)
     }
 
+    private func withActiveUse<T>(
+        modelTitle: String,
+        operation: () async throws -> T
+    ) async rethrows -> T {
+        beginActiveUse(modelTitle: modelTitle)
+        defer { endActiveUse(modelTitle: modelTitle) }
+        return try await operation()
+    }
+
+    private func beginActiveUse(modelTitle: String) {
+        activeUseCount += 1
+        idleGeneration &+= 1
+        cancelIdleUnload(reason: "new activity for \(modelTitle)")
+    }
+
+    private func endActiveUse(modelTitle: String) {
+        guard activeUseCount > 0 else { return }
+        activeUseCount -= 1
+        idleGeneration &+= 1
+        guard activeUseCount == 0,
+              cachedKey != nil
+        else {
+            return
+        }
+        scheduleIdleUnload(modelTitle: modelTitle, generation: idleGeneration)
+    }
+
+    private func scheduleIdleUnload(modelTitle: String, generation: UInt64) {
+        cancelIdleUnload(reason: nil)
+        let delaySeconds = Int(Self.idleUnloadDelay.components.seconds)
+        AppLogger.stt.info("WhisperKit idle unload scheduled for \(modelTitle, privacy: .public) in \(delaySeconds, privacy: .public)s")
+        idleUnloadTask = Task {
+            do {
+                try await Task.sleep(for: Self.idleUnloadDelay)
+                await self.performIdleUnloadIfNeeded(expectedGeneration: generation)
+            } catch is CancellationError {
+            } catch {
+                AppLogger.stt.error("WhisperKit idle unload task failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func cancelIdleUnload(reason: String?) {
+        guard let idleUnloadTask else { return }
+        idleUnloadTask.cancel()
+        self.idleUnloadTask = nil
+        if let reason {
+            AppLogger.stt.info("WhisperKit idle unload cancelled: \(reason, privacy: .public)")
+        }
+    }
+
+    private func performIdleUnloadIfNeeded(expectedGeneration: UInt64) async {
+        guard idleGeneration == expectedGeneration,
+              activeUseCount == 0,
+              loadingTasks.isEmpty,
+              let whisperKit,
+              let cachedKey
+        else {
+            return
+        }
+
+        idleUnloadTask = nil
+        await whisperKit.unloadModels()
+        self.whisperKit = nil
+        self.cachedKey = nil
+        AppLogger.stt.info("WhisperKit idle unload completed for \(cachedKey.model.title, privacy: .public)")
+    }
+
     nonisolated private static func formattedSeconds(_ duration: TimeInterval) -> String {
         String(format: "%.2f", duration)
     }
@@ -209,6 +290,7 @@ actor WhisperKitRuntimeStore {
 
 actor Qwen3ASRRuntimeStore {
     static let shared = Qwen3ASRRuntimeStore()
+    private static let idleUnloadDelay: Duration = .seconds(300)
 
     private struct LoadingEntry {
         let token = UUID()
@@ -218,37 +300,45 @@ actor Qwen3ASRRuntimeStore {
     private var cachedModel: STTModelOption?
     private var qwenModel: Qwen3ASRModel?
     private var loadingTasks: [STTModelOption: LoadingEntry] = [:]
+    private var activeUseCount = 0
+    private var idleGeneration: UInt64 = 0
+    private var idleUnloadTask: Task<Void, Never>?
 
     func preload(configuration: STTConfiguration) async throws {
         guard configuration.isModelInstalled else { return }
-        _ = try await resolveQwenModel(for: configuration.selectedModel)
+        try await withActiveUse(modelTitle: configuration.selectedModel.title) {
+            _ = try await resolveQwenModel(for: configuration.selectedModel)
+        }
     }
 
     func transcribe(audioURL: URL, configuration: STTConfiguration) async throws -> String {
         guard configuration.isModelInstalled else {
             throw STTEngineError.modelNotInstalled(configuration.selectedModel.title)
         }
-        let model = try await resolveQwenModel(for: configuration.selectedModel)
+        return try await withActiveUse(modelTitle: configuration.selectedModel.title) {
+            let model = try await resolveQwenModel(for: configuration.selectedModel)
 
-        do {
-            let audio = try AudioFileLoader.load(url: audioURL, targetSampleRate: 16000)
-            let text = model.transcribe(
-                audio: audio,
-                sampleRate: 16000,
-                language: configuration.languageHint.qwenLanguageValue
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else {
-                throw STTEngineError.outputMissing
+            do {
+                let audio = try AudioFileLoader.load(url: audioURL, targetSampleRate: 16000)
+                let text = model.transcribe(
+                    audio: audio,
+                    sampleRate: 16000,
+                    language: configuration.languageHint.qwenLanguageValue
+                ).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else {
+                    throw STTEngineError.outputMissing
+                }
+                return text
+            } catch let error as STTEngineError {
+                throw error
+            } catch {
+                throw STTEngineError.transcriptionFailed(error.localizedDescription)
             }
-            return text
-        } catch let error as STTEngineError {
-            throw error
-        } catch {
-            throw STTEngineError.transcriptionFailed(error.localizedDescription)
         }
     }
 
     func invalidate(model: STTModelOption) {
+        cancelIdleUnload(reason: "invalidate \(model.title)")
         if cachedModel == model {
             qwenModel?.unload()
             qwenModel = nil
@@ -261,6 +351,7 @@ actor Qwen3ASRRuntimeStore {
     }
 
     func invalidateAll() {
+        cancelIdleUnload(reason: "invalidate all Qwen runtimes")
         qwenModel?.unload()
         qwenModel = nil
         cachedModel = nil
@@ -269,6 +360,8 @@ actor Qwen3ASRRuntimeStore {
     }
 
     private func resolveQwenModel(for model: STTModelOption) async throws -> Qwen3ASRModel {
+        await WhisperKitRuntimeStore.shared.invalidateAll()
+
         if cachedModel == model,
            let qwenModel {
             return qwenModel
@@ -279,6 +372,7 @@ actor Qwen3ASRRuntimeStore {
             qwenModel?.unload()
             qwenModel = nil
             cachedModel = nil
+            cancelIdleUnload(reason: "switching Qwen runtime to \(model.title)")
             AppLogger.stt.info("Qwen3-ASR unloaded previous runtime before loading \(model.title, privacy: .public)")
         }
 
@@ -332,5 +426,73 @@ actor Qwen3ASRRuntimeStore {
             }
             throw STTEngineError.qwenLoadFailed(error.localizedDescription)
         }
+    }
+
+    private func withActiveUse<T>(
+        modelTitle: String,
+        operation: () async throws -> T
+    ) async rethrows -> T {
+        beginActiveUse(modelTitle: modelTitle)
+        defer { endActiveUse(modelTitle: modelTitle) }
+        return try await operation()
+    }
+
+    private func beginActiveUse(modelTitle: String) {
+        activeUseCount += 1
+        idleGeneration &+= 1
+        cancelIdleUnload(reason: "new activity for \(modelTitle)")
+    }
+
+    private func endActiveUse(modelTitle: String) {
+        guard activeUseCount > 0 else { return }
+        activeUseCount -= 1
+        idleGeneration &+= 1
+        guard activeUseCount == 0,
+              cachedModel != nil
+        else {
+            return
+        }
+        scheduleIdleUnload(modelTitle: modelTitle, generation: idleGeneration)
+    }
+
+    private func scheduleIdleUnload(modelTitle: String, generation: UInt64) {
+        cancelIdleUnload(reason: nil)
+        let delaySeconds = Int(Self.idleUnloadDelay.components.seconds)
+        AppLogger.stt.info("Qwen3-ASR idle unload scheduled for \(modelTitle, privacy: .public) in \(delaySeconds, privacy: .public)s")
+        idleUnloadTask = Task {
+            do {
+                try await Task.sleep(for: Self.idleUnloadDelay)
+                await self.performIdleUnloadIfNeeded(expectedGeneration: generation)
+            } catch is CancellationError {
+            } catch {
+                AppLogger.stt.error("Qwen3-ASR idle unload task failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func cancelIdleUnload(reason: String?) {
+        guard let idleUnloadTask else { return }
+        idleUnloadTask.cancel()
+        self.idleUnloadTask = nil
+        if let reason {
+            AppLogger.stt.info("Qwen3-ASR idle unload cancelled: \(reason, privacy: .public)")
+        }
+    }
+
+    private func performIdleUnloadIfNeeded(expectedGeneration: UInt64) async {
+        guard idleGeneration == expectedGeneration,
+              activeUseCount == 0,
+              loadingTasks.isEmpty,
+              let qwenModel,
+              let cachedModel
+        else {
+            return
+        }
+
+        idleUnloadTask = nil
+        qwenModel.unload()
+        self.qwenModel = nil
+        self.cachedModel = nil
+        AppLogger.stt.info("Qwen3-ASR idle unload completed for \(cachedModel.title, privacy: .public)")
     }
 }
