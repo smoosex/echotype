@@ -229,12 +229,6 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section(L10n.text(L10nKey.settingsSectionPrivacy, language: uiLanguage)) {
-                Toggle(L10n.text(L10nKey.settingsKeepTempAudio, language: uiLanguage), isOn: $preferencesStore.keepAudioFiles)
-                Text(L10n.text(L10nKey.settingsKeepTempAudioHelp, language: uiLanguage))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
         .formStyle(.grouped)
         .onChange(of: hotkeyEnabledState) { _, newValue in

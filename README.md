@@ -12,7 +12,6 @@ It lets you start recording with a global hotkey, transcribes speech into text l
 - Fully local offline transcription with `WhisperKit` and `Qwen3-ASR (speech-swift / MLX)`
 - Two text injection modes: clipboard only, or clipboard plus auto-paste with automatic fallback
 - Settings page includes hotkey editing, permission guidance, model install/remove, and language hints
-- Temporary audio files are not kept by default, but can be preserved in Settings if needed
 
 ## System Requirements
 
@@ -141,5 +140,4 @@ scripts/uninstall.sh --yes
 ## Privacy
 
 - Audio and transcription text are not uploaded to external services by default
-- Raw recordings are not persisted by default
 - Logs are used for diagnostics and do not record raw audio content

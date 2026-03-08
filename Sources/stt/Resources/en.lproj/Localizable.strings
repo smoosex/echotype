@@ -32,9 +32,6 @@
 "settings.section.permissions" = "Permissions";
 "settings.refresh_status" = "Refresh Status";
 "settings.permissions_help" = "Use Request to trigger system prompt. If macOS does not re-prompt, use Open Settings.";
-"settings.section.privacy" = "Privacy";
-"settings.keep_temp_audio" = "Keep temporary audio files";
-"settings.keep_temp_audio_help" = "Default is off. Audio files are deleted immediately after processing.";
 "settings.install" = "Install";
 "settings.section.language_hint" = "Language Hint";
 "settings.section.model" = "Model";

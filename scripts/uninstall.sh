@@ -78,12 +78,10 @@ cleanup_temp_files() {
   log "Cleaning temporary EchoType files"
   if $DRY_RUN; then
     echo "[dry-run] rm -rf /tmp/echotype-runtime-*"
-    echo "[dry-run] find /var/folders -type f -name 'echotype-recording-*.wav' -delete"
     return 0
   fi
 
   rm -rf /tmp/echotype-runtime-* 2>/dev/null || true
-  find /var/folders -type f -name 'echotype-recording-*.wav' -delete 2>/dev/null || true
 }
 
 for arg in "$@"; do

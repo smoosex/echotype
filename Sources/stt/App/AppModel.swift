@@ -486,9 +486,7 @@ final class AppModel: ObservableObject {
         pipelineStart: Date
     ) async {
         defer {
-            if !preferencesStore.keepAudioFiles {
-                try? FileManager.default.removeItem(at: audioURL)
-            }
+            try? FileManager.default.removeItem(at: audioURL)
         }
 
         var success = false

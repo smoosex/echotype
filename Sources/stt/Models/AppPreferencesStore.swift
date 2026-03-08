@@ -6,10 +6,6 @@ final class AppPreferencesStore: ObservableObject {
         didSet { persist() }
     }
 
-    @Published var keepAudioFiles: Bool {
-        didSet { persist() }
-    }
-
     @Published var appLanguage: AppLanguage {
         didSet { persist() }
     }
@@ -20,7 +16,6 @@ final class AppPreferencesStore: ObservableObject {
 
     private enum Keys {
         static let injectionMode = "app.preferences.injectionMode"
-        static let keepAudioFiles = "app.preferences.keepAudioFiles"
         static let appLanguage = "app.preferences.language"
         static let hotkeyEnabled = "app.preferences.hotkey.enabled"
     }
@@ -31,7 +26,6 @@ final class AppPreferencesStore: ObservableObject {
         self.defaults = defaults
         let rawMode = defaults.string(forKey: Keys.injectionMode) ?? TextInjectionMode.clipboardThenPaste.rawValue
         injectionMode = TextInjectionMode(rawValue: rawMode) ?? .clipboardThenPaste
-        keepAudioFiles = defaults.bool(forKey: Keys.keepAudioFiles)
         appLanguage = AppLanguage.fromPersistedCode(defaults.string(forKey: Keys.appLanguage))
 
         if defaults.object(forKey: Keys.hotkeyEnabled) == nil {
@@ -47,7 +41,6 @@ final class AppPreferencesStore: ObservableObject {
 
     private func persist() {
         defaults.set(injectionMode.rawValue, forKey: Keys.injectionMode)
-        defaults.set(keepAudioFiles, forKey: Keys.keepAudioFiles)
         defaults.set(appLanguage.persistedCode, forKey: Keys.appLanguage)
         defaults.set(hotkeyEnabled, forKey: Keys.hotkeyEnabled)
     }

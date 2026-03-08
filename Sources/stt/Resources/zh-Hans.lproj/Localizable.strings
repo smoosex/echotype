@@ -32,9 +32,6 @@
 "settings.section.permissions" = "权限";
 "settings.refresh_status" = "刷新状态";
 "settings.permissions_help" = "点击“请求”触发系统弹窗；若 macOS 不再弹窗，请使用“打开设置”。";
-"settings.section.privacy" = "隐私";
-"settings.keep_temp_audio" = "保留临时音频文件";
-"settings.keep_temp_audio_help" = "默认关闭。处理完成后会立即删除音频文件。";
 "settings.install" = "安装";
 "settings.section.language_hint" = "语言提示";
 "settings.section.model" = "模型";
