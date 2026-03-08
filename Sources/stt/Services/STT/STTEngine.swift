@@ -124,6 +124,16 @@ actor WhisperKitRuntimeStore {
             return whisperKit
         }
 
+        if cachedKey != nil,
+           cachedKey != key {
+            if let whisperKit {
+                await whisperKit.unloadModels()
+            }
+            whisperKit = nil
+            cachedKey = nil
+            AppLogger.stt.info("WhisperKit unloaded previous runtime before loading \(model.title, privacy: .public)")
+        }
+
         if let loadingTask = loadingTasks[key] {
             AppLogger.stt.info("WhisperKit awaiting in-flight load: \(model.title, privacy: .public)")
             do {
@@ -262,6 +272,14 @@ actor Qwen3ASRRuntimeStore {
         if cachedModel == model,
            let qwenModel {
             return qwenModel
+        }
+
+        if cachedModel != nil,
+           cachedModel != model {
+            qwenModel?.unload()
+            qwenModel = nil
+            cachedModel = nil
+            AppLogger.stt.info("Qwen3-ASR unloaded previous runtime before loading \(model.title, privacy: .public)")
         }
 
         if let loadingTask = loadingTasks[model] {
