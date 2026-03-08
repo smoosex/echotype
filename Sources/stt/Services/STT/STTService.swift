@@ -30,6 +30,14 @@ final class STTService {
         try await engine.preload()
     }
 
+    func beginRecordingPreparation() async throws {
+        try await engine.beginRecordingPreparation()
+    }
+
+    func endRecordingPreparation() async {
+        await engine.endRecordingPreparation()
+    }
+
     private func withTimeout<T: Sendable>(
         _ duration: Duration,
         operation: @escaping @Sendable () async throws -> T
@@ -62,6 +70,14 @@ private struct WhisperKitEngine: STTEngine {
     func preload() async throws {
         try await WhisperKitRuntimeStore.shared.preload(configuration: configuration)
     }
+
+    func beginRecordingPreparation() async throws {
+        try await WhisperKitRuntimeStore.shared.beginRecordingPreparation(configuration: configuration)
+    }
+
+    func endRecordingPreparation() async {
+        await WhisperKitRuntimeStore.shared.endRecordingPreparation(configuration: configuration)
+    }
 }
 
 private struct SpeechSwiftQwenEngine: STTEngine {
@@ -73,5 +89,13 @@ private struct SpeechSwiftQwenEngine: STTEngine {
 
     func preload() async throws {
         try await Qwen3ASRRuntimeStore.shared.preload(configuration: configuration)
+    }
+
+    func beginRecordingPreparation() async throws {
+        try await Qwen3ASRRuntimeStore.shared.beginRecordingPreparation(configuration: configuration)
+    }
+
+    func endRecordingPreparation() async {
+        await Qwen3ASRRuntimeStore.shared.endRecordingPreparation(configuration: configuration)
     }
 }

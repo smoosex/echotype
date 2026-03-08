@@ -6,6 +6,8 @@ import Foundation
 protocol STTEngine: Sendable {
     func transcribe(audioURL: URL) async throws -> String
     func preload() async throws
+    func beginRecordingPreparation() async throws
+    func endRecordingPreparation() async
 }
 
 enum STTEngineError: LocalizedError {
@@ -68,6 +70,30 @@ actor WhisperKitRuntimeStore {
             let preloadSeconds = Self.formattedSeconds(Date().timeIntervalSince(preloadStart))
             AppLogger.stt.info("WhisperKit preload ready for \(configuration.selectedModel.title, privacy: .public) in \(preloadSeconds, privacy: .public)s")
         }
+    }
+
+    func beginRecordingPreparation(configuration: STTConfiguration) async throws {
+        guard configuration.isModelInstalled,
+              let folder = configuration.whisperModelFolder
+        else {
+            return
+        }
+
+        beginActiveUse(modelTitle: configuration.selectedModel.title)
+        do {
+            let preloadStart = Date()
+            _ = try await resolveWhisperKit(for: configuration.selectedModel, folder: folder)
+            let preloadSeconds = Self.formattedSeconds(Date().timeIntervalSince(preloadStart))
+            AppLogger.stt.info("WhisperKit recording preparation ready for \(configuration.selectedModel.title, privacy: .public) in \(preloadSeconds, privacy: .public)s")
+        } catch {
+            endActiveUse(modelTitle: configuration.selectedModel.title)
+            throw error
+        }
+    }
+
+    func endRecordingPreparation(configuration: STTConfiguration) {
+        guard configuration.isModelInstalled else { return }
+        endActiveUse(modelTitle: configuration.selectedModel.title)
     }
 
     func transcribe(audioURL: URL, configuration: STTConfiguration) async throws -> String {
@@ -309,6 +335,24 @@ actor Qwen3ASRRuntimeStore {
         try await withActiveUse(modelTitle: configuration.selectedModel.title) {
             _ = try await resolveQwenModel(for: configuration.selectedModel)
         }
+    }
+
+    func beginRecordingPreparation(configuration: STTConfiguration) async throws {
+        guard configuration.isModelInstalled else { return }
+
+        beginActiveUse(modelTitle: configuration.selectedModel.title)
+        do {
+            _ = try await resolveQwenModel(for: configuration.selectedModel)
+            AppLogger.stt.info("Qwen3-ASR recording preparation ready for \(configuration.selectedModel.title, privacy: .public)")
+        } catch {
+            endActiveUse(modelTitle: configuration.selectedModel.title)
+            throw error
+        }
+    }
+
+    func endRecordingPreparation(configuration: STTConfiguration) {
+        guard configuration.isModelInstalled else { return }
+        endActiveUse(modelTitle: configuration.selectedModel.title)
     }
 
     func transcribe(audioURL: URL, configuration: STTConfiguration) async throws -> String {

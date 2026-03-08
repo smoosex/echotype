@@ -40,12 +40,18 @@ final class AppModel: ObservableObject {
     private let stabilitySelfTestService = StabilitySelfTestService()
     private let onboardingDefaultsKey = "onboarding.completed"
     private let minimumPerformanceSamples = 20
+    private struct RecordingPreparation {
+        let configuration: STTConfiguration
+        let task: Task<Bool, Never>
+    }
+
     private var lastKnownShortcut = HotkeyShortcut.defaultShortcut
     private var onboardingDontShowAgainSelection = false
     private var openSettingsWindowHandler: (() -> Void)?
     private var onboardingAutoPresentationTask: DispatchWorkItem?
     private var pipelineFeedback: PipelineFeedback = .readiness
     private var performanceBaselineReport: PerformanceBaselineReport?
+    private var recordingPreparation: RecordingPreparation?
     private var selfTestExecuted = false
     private var cancellables = Set<AnyCancellable>()
 
@@ -391,6 +397,7 @@ final class AppModel: ObservableObject {
         do {
             try audioService.startRecording()
             stateStore.startRecording()
+            startRecordingPreparation()
             lastTranscription = nil
             lastAudioValidation = nil
             showRecordingOverlay()
@@ -468,6 +475,44 @@ final class AppModel: ObservableObject {
         Task { [weak self] in
             await self?.finalizeRecordingFlow()
         }
+    }
+
+    private func startRecordingPreparation() {
+        recordingPreparation?.task.cancel()
+
+        let configuration = sttConfigurationStore.makeConfiguration()
+        guard configuration.isModelInstalled else {
+            recordingPreparation = nil
+            return
+        }
+
+        let task = Task(priority: .utility) {
+            do {
+                let sttService = STTService(configuration: configuration)
+                try await sttService.beginRecordingPreparation()
+                return true
+            } catch is CancellationError {
+                AppLogger.stt.info("Recording preparation cancelled: \(configuration.selectedModel.title, privacy: .public)")
+                return false
+            } catch {
+                AppLogger.stt.error("Recording preparation failed: \(error.localizedDescription)")
+                return false
+            }
+        }
+
+        recordingPreparation = RecordingPreparation(
+            configuration: configuration,
+            task: task
+        )
+    }
+
+    private func finishRecordingPreparation(_ preparation: RecordingPreparation?) async {
+        guard let preparation else { return }
+        let didAcquirePreparation = await preparation.task.value
+        guard didAcquirePreparation else { return }
+
+        let sttService = STTService(configuration: preparation.configuration)
+        await sttService.endRecordingPreparation()
     }
 
     private func showRecordingOverlay() {
@@ -588,6 +633,9 @@ final class AppModel: ObservableObject {
     }
 
     private func finalizeRecordingFlow() async {
+        let preparation = recordingPreparation
+        recordingPreparation = nil
+
         do {
             let outputURL = try await audioService.stopRecording()
             lastRecordingFile = outputURL.lastPathComponent
@@ -609,6 +657,8 @@ final class AppModel: ObservableObject {
             applyPipelineFeedback(.failure(error.localizedDescription))
             AppLogger.audio.error("Recording pipeline failed: \(error.localizedDescription)")
         }
+
+        await finishRecordingPreparation(preparation)
     }
 
     private func loadPersistedPerformanceReport() async {
