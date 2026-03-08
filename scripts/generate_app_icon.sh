@@ -7,8 +7,8 @@ Usage:
   scripts/generate_app_icon.sh [options]
 
 Options:
-  --source <path>   Source SVG path (default: docs/assets/logo/echotype-logo-primary.svg)
-  --output <path>   Output icns path (default: docs/assets/logo/AppIcon.icns)
+  --source <path>   Source SVG path (default: assets/logo/echotype-logo-primary.svg)
+  --output <path>   Output icns path (default: assets/logo/AppIcon.icns)
   --name <name>     Iconset directory name (default: EchoType)
 EOF
 }
@@ -18,8 +18,8 @@ die() {
   exit 1
 }
 
-SOURCE_SVG="docs/assets/logo/echotype-logo-primary.svg"
-OUTPUT_ICNS="docs/assets/logo/AppIcon.icns"
+SOURCE_SVG="assets/logo/echotype-logo-primary.svg"
+OUTPUT_ICNS="assets/logo/AppIcon.icns"
 ICONSET_NAME="EchoType"
 
 while [[ $# -gt 0 ]]; do

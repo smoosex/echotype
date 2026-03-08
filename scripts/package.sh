@@ -11,7 +11,7 @@ Options:
   --app-name <name>            App bundle name (default: EchoType)
   --binary-name <name>         Swift executable target name (default: echotype)
   --bundle-id <id>             CFBundleIdentifier (default: com.smoose.echotype)
-  --icon-path <path>           App icon .icns path relative to repo root (default: docs/assets/logo/AppIcon.icns)
+  --icon-path <path>           App icon .icns path relative to repo root (default: assets/logo/AppIcon.icns)
   --output-dir <path>          Output directory (default: dist)
   --sign-identity <identity>   codesign identity (default: - for ad-hoc)
 EOF
@@ -26,7 +26,7 @@ VERSION=""
 APP_NAME="EchoType"
 BINARY_NAME="echotype"
 BUNDLE_ID="com.smoose.echotype"
-ICON_PATH="docs/assets/logo/AppIcon.icns"
+ICON_PATH="assets/logo/AppIcon.icns"
 OUTPUT_DIR="dist"
 SIGN_IDENTITY="-"
 
