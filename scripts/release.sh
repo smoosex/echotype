@@ -117,7 +117,7 @@ cask "${TOKEN}" do
   desc "Offline speech-to-text menubar app for macOS"
   homepage "https://github.com/${REPO}"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: ">= :sonoma"
 
   app "${APP_NAME}.app"
 end

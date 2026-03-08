@@ -7,14 +7,15 @@ EchoType 是一个 macOS 原生离线语音转文字 menubar 应用。
 ## 功能概览
 
 - 全局热键一键开始/结束录音（默认 `⌥ ⌘ Space`，支持在设置中直接按键录入）
-- 本地离线转写，支持 `Whisper` 与 `Qwen3-ASR (Local CLI)`
+- 本地离线转写，支持 `WhisperKit` 与 `Qwen3-ASR (speech-swift / MLX)`
 - 文本注入支持两种模式：仅剪贴板、剪贴板+自动粘贴（失败自动回退）
-- 设置页支持热键编辑、权限引导、运行时安装/检测、模型安装/删除
+- 设置页支持热键编辑、权限引导、模型安装/删除与语言提示
 - 默认不保留临时录音文件（可在设置中开启保留）
 
 ## 系统要求
 
-- macOS 13+
+- macOS 14+
+- Apple Silicon（M1 或更新）
 - 麦克风权限（录音必需）
 - 辅助功能权限（自动粘贴可选，未授权时仍可复制）
 
@@ -39,7 +40,7 @@ brew install --cask smoosex/tap/echotype
 2. 打开后拖拽 `EchoType.app` 到 `Applications`
 3. 首次启动按提示授予权限
 
-说明：当前公开产物默认是 ad-hoc 签名。若遇到系统阻止启动，可在 Finder 中右键应用选择“打开”，或在系统“隐私与安全性”中允许。
+说明：当前公开产物默认使用 ad-hoc 签名的可执行文件与资源 bundle，尚未做 Developer ID / notarization。若遇到系统阻止启动，可在 Finder 中右键应用选择“打开”，或在系统“隐私与安全性”中允许。
 
 ## 首次使用
 
@@ -47,32 +48,36 @@ brew install --cask smoosex/tap/echotype
 2. 可勾选 `Don't show this guide again`，后续启动不再自动显示（仍可从菜单 `Welcome Guide` 手动打开）
 3. 点击 `Start Using EchoType` 会自动进入 Settings 页面
 4. 在 `General` 标签页点击热键录制框，直接按键设置快捷键（注册失败会提示原因并自动回退默认 `⌥⌘Space`）
-5. 在 `Engine` 标签页安装或检测运行时，安装模型
+5. 在 `Models` 标签页选择模型并安装
 6. 回到主界面按热键开始录音，再按一次结束并等待转写
 
-## 运行时与模型
+## 模型
 
-### Whisper
+EchoType 不再依赖外部 CLI Runtime。应用内直接使用原生 Swift 推理栈：
 
-- Runtime：建议通过 Homebrew 安装 `whisper.cpp`
-- 在设置中可点击 `Detect` 自动检测可执行文件
-- 模型支持应用内安装、暂停/继续、取消、删除
+- `WhisperKit`：用于 Whisper 模型
+- `speech-swift`：用于 Qwen3-ASR 模型（Apple Silicon GPU / MLX）
 
-### Qwen3-ASR
+当前提供的模型包括：
 
-- 通过本地 `qwen-asr-cli` 执行转写（不再依赖应用内本地服务）
-- 在设置中可点击 `Detect` 自动检测 `qwen-asr`
-- Runtime 安装入口提供命令提示：
-  - `brew install qwen-asr-cli`
-  - 或 `python -m pip install qwen-asr-cli`
-- 模型支持应用内安装、删除
+- `Whisper Tiny`
+- `Whisper Base`
+- `Whisper Large v3`
+- `Qwen3-ASR 0.6B`
+- `Qwen3-ASR 1.7B`
+
+安装后，EchoType 会根据所选模型自动切换到对应引擎。
 
 ## 本地开发
 
 ```bash
 swift build
+scripts/build_mlx_metallib.sh debug
 swift run
 ```
+
+说明：`speech-swift` 依赖 `mlx.metallib`。首次本地开发构建后，请运行一次 `scripts/build_mlx_metallib.sh debug`。
+如当前系统只启用了 Command Line Tools，可先安装完整 Xcode，再运行 `xcodebuild -downloadComponent MetalToolchain`。
 
 ## 发布打包（维护者）
 
@@ -109,7 +114,7 @@ scripts/release.sh \
 
 - macOS Tahoe 26.3
 - Apple Silicon（arm64）
-- Xcode Command Line Tools（Swift 6.2.x）
+- Xcode 26.3 + Metal Toolchain
 - Homebrew（用于安装/验证 cask）
 
 ## 完整卸载

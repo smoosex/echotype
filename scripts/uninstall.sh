@@ -5,8 +5,8 @@ APP_NAME="EchoType"
 APP_BUNDLE_ID="com.smoose.echotype"
 APP_PATH="/Applications/EchoType.app"
 APP_SUPPORT_PATH="${HOME}/Library/Application Support/echotype"
+APP_CACHE_PATH="${HOME}/Library/Caches/echotype"
 PREFERENCES_PATH="${HOME}/Library/Preferences/${APP_BUNDLE_ID}.plist"
-FALLBACK_QWEN_RUNTIME_PATH="${HOME}/.echotype-qwen-runtime"
 
 ASSUME_YES=false
 DRY_RUN=false
@@ -16,12 +16,12 @@ usage() {
 Usage: scripts/uninstall.sh [--yes] [--dry-run]
 
 Fully uninstall EchoType from current user:
-- stop EchoType/Qwen related processes
+- stop EchoType processes
 - uninstall Homebrew cask `echotype` if installed
 - remove /Applications/EchoType.app
 - remove app data under ~/Library/Application Support/echotype
+- remove cache data under ~/Library/Caches/echotype
 - remove preferences plist
-- remove fallback qwen runtime (~/.echotype-qwen-runtime)
 - remove temporary echotype-* files under /tmp and /var/folders
 
 Options:
@@ -70,17 +70,13 @@ stop_process_if_running() {
 cleanup_temp_files() {
   log "Cleaning temporary EchoType files"
   if $DRY_RUN; then
-    echo "[dry-run] rm -rf /tmp/echotype-runtime-* /tmp/echotype-qwen-runtime*"
+    echo "[dry-run] rm -rf /tmp/echotype-runtime-*"
     echo "[dry-run] find /var/folders -type f -name 'echotype-recording-*.wav' -delete"
-    echo "[dry-run] find /var/folders -type f -name 'echotype-whisper-*.txt' -delete"
-    echo "[dry-run] find /var/folders -type d -name 'echotype-qwen-runtime*' -prune -exec rm -rf {} +"
     return 0
   fi
 
-  rm -rf /tmp/echotype-runtime-* /tmp/echotype-qwen-runtime* 2>/dev/null || true
+  rm -rf /tmp/echotype-runtime-* 2>/dev/null || true
   find /var/folders -type f -name 'echotype-recording-*.wav' -delete 2>/dev/null || true
-  find /var/folders -type f -name 'echotype-whisper-*.txt' -delete 2>/dev/null || true
-  find /var/folders -type d -name 'echotype-qwen-runtime*' -prune -exec rm -rf {} + 2>/dev/null || true
 }
 
 for arg in "$@"; do
@@ -108,8 +104,8 @@ if ! $ASSUME_YES; then
 This will fully uninstall ${APP_NAME} from this machine:
 - ${APP_PATH}
 - ${APP_SUPPORT_PATH}
+- ${APP_CACHE_PATH}
 - ${PREFERENCES_PATH}
-- ${FALLBACK_QWEN_RUNTIME_PATH}
 - temporary EchoType files in /tmp and /var/folders
 EOF
   read -r -p "Type YES to continue: " confirm
@@ -121,8 +117,6 @@ fi
 
 stop_process_if_running "EchoType.app/Contents/MacOS/echotype"
 stop_process_if_running "/Applications/EchoType.app"
-stop_process_if_running "transformers_server.py"
-stop_process_if_running "qwen_asr"
 
 if command -v brew >/dev/null 2>&1; then
   if brew list --cask echotype >/dev/null 2>&1; then
@@ -133,8 +127,8 @@ fi
 
 remove_path_if_exists "$APP_PATH"
 remove_path_if_exists "$APP_SUPPORT_PATH"
+remove_path_if_exists "$APP_CACHE_PATH"
 remove_path_if_exists "$PREFERENCES_PATH"
-remove_path_if_exists "$FALLBACK_QWEN_RUNTIME_PATH"
 cleanup_temp_files
 
 log "Uninstall complete."

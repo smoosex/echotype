@@ -83,7 +83,6 @@ final class OnboardingWindowService {
     }
 
     private func activateAndShow(window: NSWindow) {
-        NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()

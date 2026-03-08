@@ -30,8 +30,8 @@ scripts/package.sh \
 ```
 
 输出目录：`dist/`
-发布包默认不内置 Runtime。
-用户需要在应用设置中安装 Runtime 与模型。
+发布包默认不内置模型。
+用户需要在应用设置中按需下载模型。
 
 ## 3. 本地上传到 GitHub Release（当前推荐）
 
@@ -88,8 +88,9 @@ brew install --cask smoosex/tap/echotype
 
 ## 5. 已知限制
 
-当前脚本产物默认使用 ad-hoc 签名。
-若希望终端用户首次启动体验更平滑，后续发布加固需增加 Developer ID 签名与 notarization。
+- `speech-swift` 依赖 `mlx.metallib`，打包机需要完整 Xcode 与 Metal Toolchain。
+- 当前脚本产物默认使用 ad-hoc 签名的可执行文件与资源 bundle，尚未做 Developer ID 签名与 notarization。
+- 由于 SwiftPM 资源 bundle 需要位于 `.app` 根目录，当前不会对顶层 `.app` 再做完整签名封装。
 
 ## 6. 完整卸载
 
@@ -106,4 +107,4 @@ scripts/uninstall.sh --dry-run
 scripts/uninstall.sh --yes
 ```
 
-脚本会删除应用二进制、应用数据、偏好设置、兜底 Runtime 和临时 EchoType 文件。
+脚本会删除应用二进制、应用数据、缓存、偏好设置和临时 EchoType 文件。
