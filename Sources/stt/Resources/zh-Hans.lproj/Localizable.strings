@@ -1,4 +1,5 @@
 "common.ok" = "确定";
+"common.cancel" = "取消";
 
 "menu.shortcuts_format" = "快捷键：%@";
 "menu.not_set" = "未设置";
@@ -42,6 +43,9 @@
 "settings.installed" = "已安装";
 "settings.not_installed" = "未安装";
 "settings.model_option_format" = "%@ [%@]";
+"settings.show_in_finder" = "在 Finder 中显示";
+"settings.delete_model_title_format" = "删除 %@？";
+"settings.delete_model_message_format" = "删除后需要重新下载才能使用该模型。";
 
 "permission.microphone" = "麦克风";
 "permission.accessibility" = "辅助功能";

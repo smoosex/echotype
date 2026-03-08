@@ -2,6 +2,7 @@ import Foundation
 
 enum L10nKey {
     static let commonOk = "common.ok"
+    static let commonCancel = "common.cancel"
 
     static let menuShortcutsFormat = "menu.shortcuts_format"
     static let menuNotSet = "menu.not_set"
@@ -45,6 +46,9 @@ enum L10nKey {
     static let settingsInstalled = "settings.installed"
     static let settingsNotInstalled = "settings.not_installed"
     static let settingsModelOptionFormat = "settings.model_option_format"
+    static let settingsShowInFinder = "settings.show_in_finder"
+    static let settingsDeleteModelTitleFormat = "settings.delete_model_title_format"
+    static let settingsDeleteModelMessageFormat = "settings.delete_model_message_format"
 
     static let permissionMicrophone = "permission.microphone"
     static let permissionAccessibility = "permission.accessibility"

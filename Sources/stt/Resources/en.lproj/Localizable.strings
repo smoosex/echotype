@@ -1,4 +1,5 @@
 "common.ok" = "OK";
+"common.cancel" = "Cancel";
 
 "menu.shortcuts_format" = "Shortcuts: %@";
 "menu.not_set" = "Not set";
@@ -42,6 +43,9 @@
 "settings.installed" = "Installed";
 "settings.not_installed" = "Not Installed";
 "settings.model_option_format" = "%@ [%@]";
+"settings.show_in_finder" = "Show in Finder";
+"settings.delete_model_title_format" = "Delete %@?";
+"settings.delete_model_message_format" = "You will need to download this model again before using it.";
 
 "permission.microphone" = "Microphone";
 "permission.accessibility" = "Accessibility";

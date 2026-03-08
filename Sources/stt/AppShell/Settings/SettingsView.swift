@@ -27,6 +27,7 @@ struct SettingsView: View {
     @State private var hotkeyRecorderMessage: String?
     @State private var hotkeyRecorderError: String?
     @State private var hotkeyEnabledState: Bool
+    @State private var deleteConfirmationModel: STTModelOption?
     private var uiLanguage: AppLanguage { preferencesStore.appLanguage }
 
     init(
@@ -351,66 +352,33 @@ struct SettingsView: View {
             }
 
             Section(L10n.text(L10nKey.settingsSectionModel, language: uiLanguage)) {
-                HStack(spacing: 8) {
-                    Picker(L10n.text(L10nKey.settingsModel, language: uiLanguage), selection: $configurationStore.selectedModelID) {
-                        ForEach(STTModelOption.allCases) { option in
-                            Text(modelOptionTitle(for: option)).tag(option.rawValue)
-                        }
+                VStack(spacing: 12) {
+                    ForEach(STTModelOption.allCases) { model in
+                        modelCard(for: model)
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Button(selectedModelInstalled
-                        ? L10n.text(L10nKey.settingsDelete, language: uiLanguage)
-                        : L10n.text(L10nKey.settingsInstall, language: uiLanguage)
-                    ) {
-                        handleSelectedModelAction()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(modelActionDisabled)
-                }
-
-                Text(configurationStore.selectedModel.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if configurationStore.isInstallingModel {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if let progress = configurationStore.modelInstallProgressFraction {
-                            ProgressView(value: progress)
-                                .progressViewStyle(.linear)
-                        } else {
-                            ProgressView()
-                                .progressViewStyle(.linear)
-                        }
-                        Text(configurationStore.modelInstallStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if let transferText = configurationStore.modelInstallTransferText {
-                            Text(transferText)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                if let modelInstallError = configurationStore.modelInstallError {
-                    Text(modelInstallError)
-                        .font(.caption)
-                        .foregroundStyle(.red)
                 }
             }
         }
         .formStyle(.grouped)
-    }
-
-    private var selectedModelInstalled: Bool {
-        configurationStore.isModelInstalled(configurationStore.selectedModel)
-    }
-
-    private var modelActionDisabled: Bool {
-        configurationStore.isInstallingModel
+        .alert(
+            L10n.text(
+                L10nKey.settingsDeleteModelTitleFormat,
+                language: uiLanguage,
+                deleteConfirmationModel?.title ?? ""
+            ),
+            isPresented: deleteAlertPresented,
+            presenting: deleteConfirmationModel
+        ) { model in
+            Button(L10n.text(L10nKey.settingsDelete, language: uiLanguage), role: .destructive) {
+                configurationStore.deleteModel(model)
+                deleteConfirmationModel = nil
+            }
+            Button(L10n.text(L10nKey.commonCancel, language: uiLanguage), role: .cancel) {
+                deleteConfirmationModel = nil
+            }
+        } message: { _ in
+            Text(L10n.text(L10nKey.settingsDeleteModelMessageFormat, language: uiLanguage))
+        }
     }
 
     private var languageHintBinding: Binding<STTLanguageHint> {
@@ -424,25 +392,193 @@ struct SettingsView: View {
         )
     }
 
-    private func modelOptionTitle(for option: STTModelOption) -> String {
-        let installed: Bool
-        installed = configurationStore.isModelInstalled(option)
-        let status = installed
-            ? L10n.text(L10nKey.settingsInstalled, language: uiLanguage)
-            : L10n.text(L10nKey.settingsNotInstalled, language: uiLanguage)
-        return L10n.text(L10nKey.settingsModelOptionFormat, language: uiLanguage, option.title, status)
+    private var deleteAlertPresented: Binding<Bool> {
+        Binding(
+            get: {
+                deleteConfirmationModel != nil
+            },
+            set: { newValue in
+                if !newValue {
+                    deleteConfirmationModel = nil
+                }
+            }
+        )
     }
 
-    private func handleSelectedModelAction() {
-        if selectedModelInstalled {
-            Task {
-                await configurationStore.deleteSelectedModel()
-            }
-            return
-        }
+    @ViewBuilder
+    private func modelCard(for model: STTModelOption) -> some View {
+        let installState = configurationStore.installState(for: model)
 
-        Task {
-            await configurationStore.installSelectedModel()
+        ModelDownloadCard(
+            title: model.title,
+            sizeText: model.downloadSizeText,
+            isSelected: configurationStore.selectedModelID == model.rawValue,
+            installState: installState,
+            onSelect: {
+                configurationStore.selectedModelID = model.rawValue
+            },
+            onInstall: {
+                configurationStore.installModel(model)
+            }
+        )
+        .contextMenu {
+            if installState.isInstalled && !installState.isBusy {
+                Button(L10n.text(L10nKey.settingsShowInFinder, language: uiLanguage)) {
+                    configurationStore.revealModelInFinder(model)
+                }
+
+                Button(L10n.text(L10nKey.settingsDelete, language: uiLanguage), role: .destructive) {
+                    deleteConfirmationModel = model
+                }
+            }
+        }
+    }
+}
+
+private struct ModelDownloadCard: View {
+    let title: String
+    let sizeText: String
+    let isSelected: Bool
+    let installState: ModelInstallRowState
+    let onSelect: () -> Void
+    let onInstall: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Button(action: onSelect) {
+                    HStack(spacing: 12) {
+                        ModelRadioIndicator(isSelected: isSelected)
+
+                        Text(title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Text(sizeText)
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                trailingControl
+            }
+
+            if let error = installState.error {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(cardBackground)
+        .overlay(cardBorder)
+    }
+
+    @ViewBuilder
+    private var trailingControl: some View {
+        if installState.isBusy {
+            ModelInstallProgressRing(
+                progress: installState.progressFraction,
+                tint: installState.activity == .deleting ? .secondary : .accentColor
+            )
+            .frame(width: 18, height: 18)
+        } else if installState.isInstalled {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.green)
+                .frame(width: 18, height: 18)
+        } else {
+            Button(action: onInstall) {
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(
+                isSelected
+                    ? Color.accentColor.opacity(0.08)
+                    : Color(nsColor: .controlBackgroundColor)
+            )
+    }
+
+    private var cardBorder: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .strokeBorder(
+                isSelected
+                    ? Color.accentColor.opacity(0.45)
+                    : Color(nsColor: .separatorColor).opacity(0.5),
+                lineWidth: 1
+            )
+    }
+}
+
+private struct ModelRadioIndicator: View {
+    let isSelected: Bool
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .strokeBorder(
+                    isSelected ? Color.accentColor : Color.secondary.opacity(0.6),
+                    lineWidth: 2
+                )
+
+            if isSelected {
+                Circle()
+                    .fill(Color.accentColor)
+                    .padding(4)
+            }
+        }
+        .frame(width: 16, height: 16)
+    }
+}
+
+private struct ModelInstallProgressRing: View {
+    let progress: Double?
+    let tint: Color
+
+    @State private var rotationDegrees: Double = 0
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(tint.opacity(0.18), lineWidth: 2.5)
+
+            if let progress {
+                Circle()
+                    .trim(from: 0, to: max(0.06, min(progress, 1)))
+                    .stroke(
+                        tint,
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+            } else {
+                Circle()
+                    .trim(from: 0.1, to: 0.72)
+                    .stroke(
+                        tint,
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(rotationDegrees - 90))
+                    .onAppear {
+                        rotationDegrees = 0
+                        withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
+                            rotationDegrees = 360
+                        }
+                    }
+            }
         }
     }
 }

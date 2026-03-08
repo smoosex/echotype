@@ -117,6 +117,21 @@ enum STTModelOption: String, CaseIterable, Identifiable, Codable {
         }
     }
 
+    var downloadSizeText: String {
+        switch self {
+        case .whisperTiny:
+            return "73 MB"
+        case .whisperBase:
+            return "140 MB"
+        case .whisperLargeV3v20240930:
+            return "1.5 GB"
+        case .qwen06B:
+            return "400 MB"
+        case .qwen17B:
+            return "2.5 GB"
+        }
+    }
+
     var whisperVariant: String? {
         switch self {
         case .whisperTiny:

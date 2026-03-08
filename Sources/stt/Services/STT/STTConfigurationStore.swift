@@ -1,14 +1,37 @@
+import AppKit
 @preconcurrency import AudioCommon
 import Foundation
 @preconcurrency import Qwen3ASR
 @preconcurrency import WhisperKit
+
+struct ModelInstallRowState: Equatable {
+    enum Activity: Equatable {
+        case idle
+        case installing
+        case deleting
+    }
+
+    let activity: Activity
+    let isInstalled: Bool
+    let progressFraction: Double?
+    let transferText: String?
+    let error: String?
+
+    var isBusy: Bool {
+        activity != .idle
+    }
+
+    var showsIndeterminateProgress: Bool {
+        isBusy && progressFraction == nil
+    }
+}
 
 @MainActor
 final class STTConfigurationStore: ObservableObject {
     @Published var selectedModelID: String {
         didSet {
             persist()
-            refreshModelInstallStatus()
+            advanceReadinessRevision()
             scheduleBackgroundPreloadIfNeeded()
         }
     }
@@ -17,19 +40,14 @@ final class STTConfigurationStore: ObservableObject {
         didSet { persist() }
     }
 
-    @Published private(set) var isInstallingModel = false
-    @Published private(set) var modelInstallStatus: String
-    @Published private(set) var modelInstallError: String?
-    @Published private(set) var modelInstallProgressFraction: Double?
-    @Published private(set) var modelInstallDownloadedBytes: Int64?
-    @Published private(set) var modelInstallTotalBytes: Int64?
     @Published private(set) var readinessRevision: Int = 0
+    @Published private var modelOperationStates: [String: ModelOperationState]
 
     private let defaults: UserDefaults
     private let fileManager: FileManager
     private var whisperModelFolders: [String: String]
-    private var installProgressIsEstimated = false
     private var backgroundPreloadTask: Task<Void, Never>?
+    private var modelOperationTasks: [String: Task<Void, Never>] = [:]
 
     private static let byteCountFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
@@ -42,9 +60,11 @@ final class STTConfigurationStore: ObservableObject {
 
     private final class ProgressBridge: @unchecked Sendable {
         private weak var store: STTConfigurationStore?
+        private let modelID: String
 
-        init(store: STTConfigurationStore) {
+        init(store: STTConfigurationStore, modelID: String) {
             self.store = store
+            self.modelID = modelID
         }
 
         func publish(
@@ -55,6 +75,7 @@ final class STTConfigurationStore: ObservableObject {
         ) {
             Task { @MainActor [weak store] in
                 store?.updateInstallProgress(
+                    for: modelID,
                     fraction: fraction,
                     downloadedBytes: downloadedBytes,
                     totalBytes: totalBytes,
@@ -62,6 +83,15 @@ final class STTConfigurationStore: ObservableObject {
                 )
             }
         }
+    }
+
+    private struct ModelOperationState {
+        var activity: ModelInstallRowState.Activity = .idle
+        var progressFraction: Double?
+        var downloadedBytes: Int64?
+        var totalBytes: Int64?
+        var isEstimated = false
+        var error: String?
     }
 
     private enum Keys {
@@ -80,6 +110,7 @@ final class STTConfigurationStore: ObservableObject {
     ) {
         self.defaults = defaults
         self.fileManager = fileManager
+        modelOperationStates = [:]
 
         STTPathResolver.configureSpeechSwiftEnvironment(fileManager: fileManager)
 
@@ -93,19 +124,15 @@ final class STTConfigurationStore: ObservableObject {
         selectedModelID = migratedSelection.rawValue
         languageHintCode = defaults.string(forKey: Keys.languageHintCode) ?? "auto"
         whisperModelFolders = defaults.dictionary(forKey: Keys.whisperModelFolders) as? [String: String] ?? [:]
-        modelInstallStatus = ""
-        modelInstallError = nil
-        modelInstallProgressFraction = nil
-        modelInstallDownloadedBytes = nil
-        modelInstallTotalBytes = nil
 
         persist()
-        refreshModelInstallStatus()
+        advanceReadinessRevision()
         scheduleBackgroundPreloadIfNeeded()
     }
 
     deinit {
         backgroundPreloadTask?.cancel()
+        modelOperationTasks.values.forEach { $0.cancel() }
     }
 
     var selectedModel: STTModelOption {
@@ -132,13 +159,15 @@ final class STTConfigurationStore: ObservableObject {
         return L10n.text(L10nKey.sttReady)
     }
 
-    var modelInstallTransferText: String? {
-        guard let totalBytes = modelInstallTotalBytes else { return nil }
-        let downloadedBytes = min(modelInstallDownloadedBytes ?? 0, totalBytes)
-        let downloadedText = Self.byteCountFormatter.string(fromByteCount: downloadedBytes)
-        let totalText = Self.byteCountFormatter.string(fromByteCount: totalBytes)
-        let prefix = installProgressIsEstimated ? "~" : ""
-        return "\(prefix)\(downloadedText) / \(prefix)\(totalText)"
+    func installState(for model: STTModelOption) -> ModelInstallRowState {
+        let operation = modelOperationStates[model.id]
+        return ModelInstallRowState(
+            activity: operation?.activity ?? .idle,
+            isInstalled: isModelInstalled(model),
+            progressFraction: operation?.progressFraction,
+            transferText: transferText(for: operation),
+            error: operation?.error
+        )
     }
 
     func isModelInstalled(_ model: STTModelOption) -> Bool {
@@ -157,27 +186,62 @@ final class STTConfigurationStore: ObservableObject {
         }
     }
 
-    func installSelectedModel() async {
-        guard !isInstallingModel else { return }
-        let model = selectedModel
+    func installModel(_ model: STTModelOption) {
+        guard modelOperationTasks[model.id] == nil else { return }
 
-        if isModelInstalled(model) {
-            modelInstallError = nil
-            modelInstallProgressFraction = 1
-            modelInstallStatus = L10n.text(L10nKey.sttInstalledFormat, model.title)
-            advanceReadinessRevision()
+        guard !isModelInstalled(model) else {
+            clearModelOperationState(for: model)
             return
         }
 
-        isInstallingModel = true
-        modelInstallError = nil
-        updateInstallProgress(
-            fraction: 0,
-            downloadedBytes: 0,
-            totalBytes: model.estimatedDownloadSizeBytes,
+        let task = Task { @MainActor [weak self] in
+            if let self {
+                await self.runInstall(model)
+            }
+        }
+        modelOperationTasks[model.id] = task
+    }
+
+    func deleteModel(_ model: STTModelOption) {
+        guard modelOperationTasks[model.id] == nil else { return }
+
+        guard isModelInstalled(model) else {
+            clearModelOperationState(for: model)
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            if let self {
+                await self.runDelete(model)
+            }
+        }
+        modelOperationTasks[model.id] = task
+    }
+
+    func revealModelInFinder(_ model: STTModelOption) {
+        guard let location = installedLocation(for: model) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([location])
+    }
+
+    func installSelectedModel() {
+        installModel(selectedModel)
+    }
+
+    func deleteSelectedModel() {
+        deleteModel(selectedModel)
+    }
+
+    private func runInstall(_ model: STTModelOption) async {
+        beginOperation(
+            for: model,
+            activity: .installing,
+            initialTotalBytes: model.estimatedDownloadSizeBytes,
             isEstimated: model.estimatedDownloadSizeBytes != nil
         )
-        modelInstallStatus = L10n.text(L10nKey.sttInstallingFormat, model.title)
+
+        defer {
+            modelOperationTasks[model.id] = nil
+        }
 
         do {
             switch model.family {
@@ -188,49 +252,25 @@ final class STTConfigurationStore: ObservableObject {
             }
 
             persist()
+            clearModelOperationState(for: model)
 
-            let configuration = makeConfiguration()
-            if configuration.isModelInstalled {
-                modelInstallStatus = L10n.text(L10nKey.sttLoadingFormat, model.title)
-                do {
-                    try await preloadModel(configuration)
-                } catch is CancellationError {
-                    AppLogger.stt.info("Model preload cancelled after install: \(model.title, privacy: .public)")
-                } catch {
-                    AppLogger.stt.error("Model preload failed after install: \(error.localizedDescription)")
-                    modelInstallError = error.localizedDescription
-                }
+            if selectedModelID == model.id {
+                advanceReadinessRevision()
+                scheduleBackgroundPreloadIfNeeded()
             }
-
-            if let totalBytes = modelInstallTotalBytes {
-                updateInstallProgress(
-                    fraction: 1,
-                    downloadedBytes: totalBytes,
-                    totalBytes: totalBytes,
-                    isEstimated: installProgressIsEstimated
-                )
-            } else {
-                modelInstallProgressFraction = 1
-            }
-            modelInstallStatus = L10n.text(L10nKey.sttInstalledFormat, model.title)
-            advanceReadinessRevision()
+        } catch is CancellationError {
+            clearModelOperationState(for: model)
         } catch {
-            clearInstallProgress()
-            modelInstallStatus = L10n.text(L10nKey.sttInstallFailed)
-            modelInstallError = error.localizedDescription
+            setOperationError(for: model, message: error.localizedDescription)
         }
-
-        isInstallingModel = false
     }
 
-    func deleteSelectedModel() async {
-        let model = selectedModel
-        guard !isInstallingModel else { return }
+    private func runDelete(_ model: STTModelOption) async {
+        beginOperation(for: model, activity: .deleting)
 
-        isInstallingModel = true
-        modelInstallError = nil
-        clearInstallProgress()
-        modelInstallStatus = L10n.text(L10nKey.sttDeletingFormat, model.title)
+        defer {
+            modelOperationTasks[model.id] = nil
+        }
 
         do {
             switch model.family {
@@ -253,16 +293,22 @@ final class STTConfigurationStore: ObservableObject {
             }
 
             persist()
-            modelInstallError = nil
-            clearInstallProgress()
-            modelInstallStatus = L10n.text(L10nKey.sttDeletedFormat, model.title)
-            advanceReadinessRevision()
-        } catch {
-            modelInstallError = L10n.text(L10nKey.sttDeleteFailedWithDetailFormat, model.title, error.localizedDescription)
-        }
+            clearModelOperationState(for: model)
 
-        isInstallingModel = false
-        refreshModelInstallStatus()
+            if selectedModelID == model.id {
+                advanceReadinessRevision()
+                scheduleBackgroundPreloadIfNeeded()
+            }
+        } catch is CancellationError {
+            clearModelOperationState(for: model)
+        } catch {
+            let message = L10n.text(
+                L10nKey.sttDeleteFailedWithDetailFormat,
+                model.title,
+                error.localizedDescription
+            )
+            setOperationError(for: model, message: message)
+        }
     }
 
     private func installWhisperKitModel(_ model: STTModelOption) async throws {
@@ -271,7 +317,7 @@ final class STTConfigurationStore: ObservableObject {
         }
 
         let downloadBase = try STTPathResolver.whisperDownloadBase(fileManager: fileManager)
-        let progressBridge = ProgressBridge(store: self)
+        let progressBridge = ProgressBridge(store: self, modelID: model.id)
         let modelFolder = try await WhisperKit.download(
             variant: variant,
             downloadBase: downloadBase,
@@ -286,7 +332,7 @@ final class STTConfigurationStore: ObservableObject {
         }
 
         let cacheDirectory = try HuggingFaceDownloader.getCacheDirectory(for: modelID)
-        let progressBridge = ProgressBridge(store: self)
+        let progressBridge = ProgressBridge(store: self, modelID: model.id)
         try await HuggingFaceDownloader.downloadWeights(
             modelId: modelID,
             to: cacheDirectory,
@@ -327,27 +373,93 @@ final class STTConfigurationStore: ObservableObject {
         }
     }
 
+    private func beginOperation(
+        for model: STTModelOption,
+        activity: ModelInstallRowState.Activity,
+        initialTotalBytes: Int64? = nil,
+        isEstimated: Bool = false
+    ) {
+        modelOperationStates[model.id] = ModelOperationState(
+            activity: activity,
+            progressFraction: activity == .installing ? 0 : nil,
+            downloadedBytes: activity == .installing ? 0 : nil,
+            totalBytes: initialTotalBytes,
+            isEstimated: isEstimated,
+            error: nil
+        )
+    }
+
     private func updateInstallProgress(
+        for modelID: String,
         fraction: Double,
         downloadedBytes: Int64?,
         totalBytes: Int64?,
         isEstimated: Bool
     ) {
-        modelInstallProgressFraction = max(0, min(fraction, 1))
+        var state = modelOperationStates[modelID] ?? ModelOperationState(activity: .installing)
+        state.activity = .installing
+        state.progressFraction = max(0, min(fraction, 1))
         if let downloadedBytes {
-            modelInstallDownloadedBytes = max(0, downloadedBytes)
+            state.downloadedBytes = max(0, downloadedBytes)
         }
         if let totalBytes {
-            modelInstallTotalBytes = max(0, totalBytes)
+            state.totalBytes = max(0, totalBytes)
         }
-        installProgressIsEstimated = isEstimated
+        state.isEstimated = isEstimated
+        state.error = nil
+        modelOperationStates[modelID] = state
     }
 
-    private func clearInstallProgress() {
-        modelInstallProgressFraction = nil
-        modelInstallDownloadedBytes = nil
-        modelInstallTotalBytes = nil
-        installProgressIsEstimated = false
+    private func clearModelOperationState(for model: STTModelOption) {
+        modelOperationStates.removeValue(forKey: model.id)
+    }
+
+    private func setOperationError(for model: STTModelOption, message: String) {
+        var state = modelOperationStates[model.id] ?? ModelOperationState()
+        state.activity = .idle
+        state.progressFraction = nil
+        state.downloadedBytes = nil
+        state.totalBytes = nil
+        state.isEstimated = false
+        state.error = message
+        modelOperationStates[model.id] = state
+    }
+
+    private func transferText(for operation: ModelOperationState?) -> String? {
+        guard let operation,
+              let totalBytes = operation.totalBytes
+        else {
+            return nil
+        }
+
+        let downloadedBytes = min(operation.downloadedBytes ?? 0, totalBytes)
+        let downloadedText = Self.byteCountFormatter.string(fromByteCount: downloadedBytes)
+        let totalText = Self.byteCountFormatter.string(fromByteCount: totalBytes)
+        let prefix = operation.isEstimated ? "~" : ""
+        return "\(prefix)\(downloadedText) / \(prefix)\(totalText)"
+    }
+
+    private func installedLocation(for model: STTModelOption) -> URL? {
+        switch model.family {
+        case .whisperKit:
+            guard let folder = whisperModelFolders[model.id] else { return nil }
+            let url = URL(fileURLWithPath: folder, isDirectory: true)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue
+            else {
+                return nil
+            }
+            return url
+        case .qwen3ASR:
+            guard let modelID = model.qwenModelID,
+                  let cacheDirectory = try? HuggingFaceDownloader.getCacheDirectory(for: modelID),
+                  HuggingFaceDownloader.weightsExist(in: cacheDirectory)
+            else {
+                return nil
+            }
+            return cacheDirectory
+        }
     }
 
     private func scheduleBackgroundPreloadIfNeeded() {
@@ -378,16 +490,6 @@ final class STTConfigurationStore: ObservableObject {
         defaults.set(selectedModelID, forKey: Keys.selectedModelID)
         defaults.set(languageHint.transcriptionLanguageCode, forKey: Keys.languageHintCode)
         defaults.set(whisperModelFolders, forKey: Keys.whisperModelFolders)
-    }
-
-    private func refreshModelInstallStatus() {
-        guard !isInstallingModel else { return }
-        modelInstallError = nil
-        clearInstallProgress()
-        modelInstallStatus = isModelInstalled(selectedModel)
-            ? L10n.text(L10nKey.sttInstalledFormat, selectedModel.title)
-            : L10n.text(L10nKey.sttSelectedModelNotInstalledFormat, selectedModel.title)
-        advanceReadinessRevision()
     }
 
     private func advanceReadinessRevision() {
