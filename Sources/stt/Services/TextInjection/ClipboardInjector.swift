@@ -1,6 +1,6 @@
 import AppKit
 
-struct ClipboardInjector {
+struct ClipboardInjector: Sendable {
     func copy(text: String) -> Bool {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()

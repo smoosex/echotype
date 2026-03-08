@@ -1,19 +1,57 @@
 import Foundation
 
-final class PerformanceReportService {
-    private let encoder: JSONEncoder = {
+actor PerformanceReportService {
+    private let runsEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
+    }()
+
+    private let reportEncoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
     }()
 
     private let decoder = JSONDecoder()
+    private var cachedReport: PerformanceBaselineReport?
 
-    func appendRun(_ run: TranscriptionRunRecord) {
+    func loadOrGenerateBaselineReport(minSamples: Int = 20) -> PerformanceBaselineReport {
+        if let cachedReport {
+            return cachedReport
+        }
+
+        if let persistedReport = loadPersistedBaselineReport() {
+            cachedReport = persistedReport
+            return persistedReport
+        }
+
+        let report = makeReport(from: loadRuns(limit: nil), minSamples: minSamples)
+        persistBaselineReport(report)
+        cachedReport = report
+        return report
+    }
+
+    func appendRunAndRefresh(
+        _ run: TranscriptionRunRecord,
+        minSamples: Int = 20
+    ) -> PerformanceBaselineReport {
+        appendRun(run)
+        let report = makeReport(from: loadRuns(limit: nil), minSamples: minSamples)
+        persistBaselineReport(report)
+        cachedReport = report
+        return report
+    }
+
+    nonisolated func metricsDirectoryPath() -> String {
+        (try? Self.metricsDirectoryURL().path) ?? "N/A"
+    }
+
+    private func appendRun(_ run: TranscriptionRunRecord) {
         do {
-            let lineData = try encoder.encode(run)
-            let fileURL = try runsFileURL()
-            try ensureDirectoryExists(for: fileURL)
+            let lineData = try runsEncoder.encode(run)
+            let fileURL = try Self.runsFileURL()
+            try Self.ensureDirectoryExists(for: fileURL)
 
             if !FileManager.default.fileExists(atPath: fileURL.path) {
                 FileManager.default.createFile(atPath: fileURL.path, contents: nil)
@@ -30,24 +68,24 @@ final class PerformanceReportService {
         }
     }
 
-    func generateAndPersistBaselineReport(minSamples: Int = 20) -> PerformanceBaselineReport {
-        let runs = loadRuns(limit: nil)
-        let report = makeReport(from: runs, minSamples: minSamples)
-
+    private func persistBaselineReport(_ report: PerformanceBaselineReport) {
         do {
-            let data = try encoder.encode(report)
-            let fileURL = try baselineReportFileURL()
-            try ensureDirectoryExists(for: fileURL)
+            let data = try reportEncoder.encode(report)
+            let fileURL = try Self.baselineReportFileURL()
+            try Self.ensureDirectoryExists(for: fileURL)
             try data.write(to: fileURL, options: .atomic)
         } catch {
             AppLogger.app.error("Failed to persist baseline report: \(error.localizedDescription)")
         }
-
-        return report
     }
 
-    func metricsDirectoryPath() -> String {
-        (try? metricsDirectoryURL().path) ?? "N/A"
+    private func loadPersistedBaselineReport() -> PerformanceBaselineReport? {
+        guard let fileURL = try? Self.baselineReportFileURL(),
+              let data = try? Data(contentsOf: fileURL) else {
+            return nil
+        }
+
+        return try? decoder.decode(PerformanceBaselineReport.self, from: data)
     }
 
     private func makeReport(from runs: [TranscriptionRunRecord], minSamples: Int) -> PerformanceBaselineReport {
@@ -72,7 +110,7 @@ final class PerformanceReportService {
     }
 
     private func loadRuns(limit: Int?) -> [TranscriptionRunRecord] {
-        guard let fileURL = try? runsFileURL(), FileManager.default.fileExists(atPath: fileURL.path) else {
+        guard let fileURL = try? Self.runsFileURL(), FileManager.default.fileExists(atPath: fileURL.path) else {
             return []
         }
 
@@ -96,15 +134,15 @@ final class PerformanceReportService {
         }
     }
 
-    private func runsFileURL() throws -> URL {
+    private nonisolated static func runsFileURL() throws -> URL {
         try metricsDirectoryURL().appendingPathComponent("transcription_runs.jsonl")
     }
 
-    private func baselineReportFileURL() throws -> URL {
+    private nonisolated static func baselineReportFileURL() throws -> URL {
         try metricsDirectoryURL().appendingPathComponent("performance_baseline.json")
     }
 
-    private func metricsDirectoryURL() throws -> URL {
+    private nonisolated static func metricsDirectoryURL() throws -> URL {
         let base = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -117,7 +155,7 @@ final class PerformanceReportService {
             .appendingPathComponent("metrics", isDirectory: true)
     }
 
-    private func ensureDirectoryExists(for fileURL: URL) throws {
+    private nonisolated static func ensureDirectoryExists(for fileURL: URL) throws {
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }

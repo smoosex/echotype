@@ -1,17 +1,25 @@
 import ApplicationServices
 
-struct PasteShortcutInjector {
-    func pasteFromClipboard() -> Bool {
+enum PasteShortcutDispatchResult: Equatable, Sendable {
+    case sent
+    case failed(PasteShortcutFailureReason)
+}
+
+struct PasteShortcutInjector: Sendable {
+    func sendPasteShortcut() -> PasteShortcutDispatchResult {
         guard AXIsProcessTrusted() else {
-            return false
+            return .failed(.accessibilityPermissionDenied)
+        }
+
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            return .failed(.eventSourceUnavailable)
         }
 
         guard
-            let source = CGEventSource(stateID: .hidSystemState),
             let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true), // keycode for V
             let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
         else {
-            return false
+            return .failed(.eventCreationFailed)
         }
 
         keyDown.flags = .maskCommand
@@ -19,6 +27,6 @@ struct PasteShortcutInjector {
 
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
-        return true
+        return .sent
     }
 }

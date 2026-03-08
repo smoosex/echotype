@@ -33,17 +33,21 @@ enum AudioServiceError: LocalizedError {
 
 final class AudioService: @unchecked Sendable {
     private let audioEngine = AVAudioEngine()
-    private let bufferLock = NSLock()
+    private let stateLock = NSLock()
     private let levelLock = NSLock()
+    private let writerQueue = DispatchQueue(label: "AudioService.writer")
     private let recordingLevelSubject = CurrentValueSubject<Double, Never>(0)
     private let levelFloor: Float = 0.000_32
     private let minimumDecibels: Float = -50
     private let attackSmoothing: Float = 0.42
     private let releaseSmoothing: Float = 0.12
     private let levelEmissionInterval: TimeInterval = 1.0 / 30.0
-
-    private var capturedBuffers: [AVAudioPCMBuffer] = []
-    private var inputFormat: AVAudioFormat?
+    private var outputRecordingURL: URL?
+    private var outputRecordingFile: AVAudioFile?
+    private var outputFormat: AVAudioFormat?
+    private var converter: AVAudioConverter?
+    private var writerError: AudioServiceError?
+    private var hasCapturedAudio = false
     private var smoothedLevel: Float = 0
     private var lastLevelEmissionUptime: TimeInterval = 0
     private(set) var isRecording = false
@@ -63,68 +67,8 @@ final class AudioService: @unchecked Sendable {
 
         let inputNode = audioEngine.inputNode
         let sourceFormat = inputNode.outputFormat(forBus: 0)
-        inputFormat = sourceFormat
+        let outputURL = makeOutputRecordingURL()
 
-        capturedBuffers.removeAll(keepingCapacity: true)
-        resetLevelMeter()
-
-        inputNode.installTap(onBus: 0, bufferSize: 2048, format: sourceFormat) { [weak self] buffer, _ in
-            guard let self else { return }
-            guard let copy = buffer.deepCopy() else { return }
-            self.bufferLock.lock()
-            self.capturedBuffers.append(copy)
-            self.bufferLock.unlock()
-            self.processMeterLevel(from: buffer)
-        }
-
-        do {
-            audioEngine.prepare()
-            try audioEngine.start()
-            isRecording = true
-        } catch {
-            inputNode.removeTap(onBus: 0)
-            inputFormat = nil
-            bufferLock.lock()
-            capturedBuffers.removeAll(keepingCapacity: false)
-            bufferLock.unlock()
-            resetLevelMeter()
-            throw error
-        }
-    }
-
-    func stopRecording() throws -> URL {
-        guard isRecording else {
-            throw AudioServiceError.notRecording
-        }
-
-        let inputNode = audioEngine.inputNode
-        inputNode.removeTap(onBus: 0)
-        audioEngine.stop()
-        isRecording = false
-        resetLevelMeter()
-
-        var buffers: [AVAudioPCMBuffer] = []
-        bufferLock.lock()
-        buffers = capturedBuffers
-        capturedBuffers.removeAll(keepingCapacity: false)
-        bufferLock.unlock()
-
-        guard !buffers.isEmpty else {
-            throw AudioServiceError.noAudioData
-        }
-
-        guard let sourceFormat = inputFormat else {
-            throw AudioServiceError.converterInitializationFailed
-        }
-
-        let outputURL = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("echotype-recording-\(UUID().uuidString).wav")
-
-        try writeWAV(from: buffers, sourceFormat: sourceFormat, outputURL: outputURL)
-        return outputURL
-    }
-
-    private func writeWAV(from buffers: [AVAudioPCMBuffer], sourceFormat: AVAudioFormat, outputURL: URL) throws {
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
             sampleRate: 16_000,
@@ -138,20 +82,126 @@ final class AudioService: @unchecked Sendable {
             throw AudioServiceError.converterInitializationFailed
         }
 
-        let outputFile = try AVAudioFile(
-            forWriting: outputURL,
-            settings: targetFormat.settings,
-            commonFormat: .pcmFormatInt16,
-            interleaved: true
-        )
+        stateLock.lock()
+        writerError = nil
+        hasCapturedAudio = false
+        stateLock.unlock()
+        outputRecordingURL = outputURL
+        outputFormat = targetFormat
+        self.converter = converter
 
-        for buffer in buffers {
+        do {
+            outputRecordingFile = try AVAudioFile(
+                forWriting: outputURL,
+                settings: targetFormat.settings,
+                commonFormat: .pcmFormatInt16,
+                interleaved: true
+            )
+        } catch {
+            cleanupRecordingResources(removeOutputFile: true)
+            throw error
+        }
+
+        resetLevelMeter()
+
+        inputNode.installTap(onBus: 0, bufferSize: 2048, format: sourceFormat) { [weak self] buffer, _ in
+            guard let self else { return }
+            guard let copy = buffer.deepCopy() else {
+                self.setWriterErrorIfNeeded(.tapCopyFailed)
+                return
+            }
+            self.writerQueue.async { [weak self] in
+                self?.appendCapturedBuffer(copy)
+            }
+            self.processMeterLevel(from: buffer)
+        }
+
+        do {
+            audioEngine.prepare()
+            try audioEngine.start()
+            isRecording = true
+        } catch {
+            inputNode.removeTap(onBus: 0)
+            cleanupRecordingResources(removeOutputFile: true)
+            resetLevelMeter()
+            throw error
+        }
+    }
+
+    func stopRecording() async throws -> URL {
+        guard isRecording else {
+            throw AudioServiceError.notRecording
+        }
+
+        let inputNode = audioEngine.inputNode
+        inputNode.removeTap(onBus: 0)
+        audioEngine.stop()
+        isRecording = false
+        resetLevelMeter()
+
+        do {
+            try await finalizeWriterQueue()
+
+            if let writerError = currentWriterError() {
+                throw writerError
+            }
+
+            guard let outputURL = outputRecordingURL else {
+                throw AudioServiceError.noAudioData
+            }
+
+            guard didCaptureAudio() else {
+                throw AudioServiceError.noAudioData
+            }
+
+            try await closeRecordingFile()
+            cleanupRecordingResources(removeOutputFile: false)
+            return outputURL
+        } catch {
+            cleanupRecordingResources(removeOutputFile: true)
+            throw error
+        }
+    }
+
+    private func appendCapturedBuffer(_ buffer: AVAudioPCMBuffer) {
+        guard
+            let outputRecordingFile,
+            let converter,
+            let outputFormat
+        else {
+            setWriterErrorIfNeeded(.noAudioData)
+            return
+        }
+
+        do {
             try convertAndWrite(
                 inputBuffer: buffer,
                 converter: converter,
-                outputFile: outputFile,
-                outputFormat: targetFormat
+                outputFile: outputRecordingFile,
+                outputFormat: outputFormat
             )
+            markCapturedAudio()
+        } catch {
+            setWriterErrorIfNeeded(.conversionFailed(error.localizedDescription))
+        }
+    }
+
+    private func finalizeWriterQueue() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            writerQueue.async {
+                continuation.resume(returning: ())
+            }
+        }
+    }
+
+    private func closeRecordingFile() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            writerQueue.async { [weak self] in
+                self?.outputRecordingFile = nil
+                self?.converter = nil
+                self?.outputFormat = nil
+                continuation.resume(returning: ())
+            }
         }
     }
 
@@ -334,6 +384,54 @@ final class AudioService: @unchecked Sendable {
             total += sqrt(sum / Float(frameLength))
         }
         return total / Float(channelCount)
+    }
+
+    private func makeOutputRecordingURL() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("echotype-recording-\(UUID().uuidString).wav")
+    }
+
+    private func currentWriterError() -> AudioServiceError? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return writerError
+    }
+
+    private func didCaptureAudio() -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return hasCapturedAudio
+    }
+
+    private func markCapturedAudio() {
+        stateLock.lock()
+        hasCapturedAudio = true
+        stateLock.unlock()
+    }
+
+    private func setWriterErrorIfNeeded(_ error: AudioServiceError) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        if writerError == nil {
+            writerError = error
+        }
+    }
+
+    private func cleanupRecordingResources(removeOutputFile: Bool) {
+        let outputURL = outputRecordingURL
+
+        stateLock.lock()
+        writerError = nil
+        hasCapturedAudio = false
+        stateLock.unlock()
+
+        outputRecordingURL = nil
+        outputRecordingFile = nil
+        outputFormat = nil
+        converter = nil
+
+        guard removeOutputFile, let outputURL else { return }
+        try? FileManager.default.removeItem(at: outputURL)
     }
 }
 

@@ -5,9 +5,8 @@ import KeyboardShortcuts
 @MainActor
 struct SettingsView: View {
     @ObservedObject var stateStore: AppStateStore
-    @ObservedObject var configurationStore: WhisperConfigurationStore
+    @ObservedObject var configurationStore: STTConfigurationStore
     @ObservedObject var preferencesStore: AppPreferencesStore
-    @ObservedObject var qwenCLIService: QwenCLIService
     let microphonePermission: PermissionState
     let accessibilityPermission: PermissionState
     let hotkeyHint: String
@@ -25,9 +24,6 @@ struct SettingsView: View {
     let onRefreshPermissions: () -> Void
     let onOpenMicrophoneSettings: () -> Void
     let onOpenAccessibilitySettings: () -> Void
-    @State private var selectedUnifiedModelID: String = ""
-    @State private var isWhisperInstallHintPresented = false
-    @State private var isQwenInstallHintPresented = false
     @State private var hotkeyRecorderMessage: String?
     @State private var hotkeyRecorderError: String?
     @State private var hotkeyEnabledState: Bool
@@ -35,9 +31,8 @@ struct SettingsView: View {
 
     init(
         stateStore: AppStateStore,
-        configurationStore: WhisperConfigurationStore,
+        configurationStore: STTConfigurationStore,
         preferencesStore: AppPreferencesStore,
-        qwenCLIService: QwenCLIService,
         microphonePermission: PermissionState,
         accessibilityPermission: PermissionState,
         hotkeyHint: String,
@@ -59,7 +54,6 @@ struct SettingsView: View {
         _stateStore = ObservedObject(wrappedValue: stateStore)
         _configurationStore = ObservedObject(wrappedValue: configurationStore)
         _preferencesStore = ObservedObject(wrappedValue: preferencesStore)
-        _qwenCLIService = ObservedObject(wrappedValue: qwenCLIService)
         self.microphonePermission = microphonePermission
         self.accessibilityPermission = accessibilityPermission
         self.hotkeyHint = hotkeyHint
@@ -206,14 +200,16 @@ struct SettingsView: View {
             }
 
             Section(L10n.text(L10nKey.settingsSectionPermissions, language: uiLanguage)) {
-                permissionRow(
+                PermissionStatusRow(
+                    appLanguage: uiLanguage,
                     title: L10n.text(L10nKey.permissionMicrophone, language: uiLanguage),
                     state: microphonePermission,
                     requestAction: onRequestMicrophone,
                     openSettingsAction: onOpenMicrophoneSettings
                 )
 
-                permissionRow(
+                PermissionStatusRow(
+                    appLanguage: uiLanguage,
                     title: L10n.text(L10nKey.permissionAccessibility, language: uiLanguage),
                     state: accessibilityPermission,
                     requestAction: onRequestAccessibility,
@@ -240,7 +236,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onChange(of: hotkeyEnabledState) { newValue in
+        .onChange(of: hotkeyEnabledState) { _, newValue in
             guard newValue != hotkeyEnabled else { return }
             if let error = onSetHotkeyEnabled(newValue) {
                 hotkeyRecorderError = error
@@ -253,7 +249,7 @@ struct SettingsView: View {
                     : L10n.text(L10nKey.settingsGlobalHotkeyDisabled, language: uiLanguage)
             }
         }
-        .onChange(of: hotkeyEnabled) { newValue in
+        .onChange(of: hotkeyEnabled) { _, newValue in
             guard hotkeyEnabledState != newValue else { return }
             hotkeyEnabledState = newValue
         }
@@ -333,44 +329,20 @@ struct SettingsView: View {
 
     private var modelTab: some View {
         Form {
-            Section(L10n.text(L10nKey.settingsSectionRuntime, language: uiLanguage)) {
-                HStack(alignment: .center, spacing: 12) {
-                    Text(L10n.text(L10nKey.settingsEngine, language: uiLanguage))
-                        .font(.body.weight(.semibold))
-                        .frame(minWidth: 64, alignment: .leading)
-
-                    HStack(spacing: 8) {
-                        Picker(L10n.text(L10nKey.settingsEngine, language: uiLanguage), selection: $configurationStore.backend) {
-                            ForEach(STTBackend.allCases) { backend in
-                                Text(backend.title(in: uiLanguage)).tag(backend)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .id("settings.engine.\(uiLanguage.rawValue)")
-
-                        Text(currentRuntimeStatusTitle)
-                            .foregroundStyle(currentRuntimeStatusColor)
-                        if !selectedEngineRuntimeInstalled {
-                            Button(L10n.text(L10nKey.settingsInstall, language: uiLanguage)) {
-                                handleRuntimeInstallAction()
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        Button(L10n.text(L10nKey.settingsDetect, language: uiLanguage)) {
-                            handleRuntimeDetectAction()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(.vertical, 4)
+            Section(L10n.text(L10nKey.settingsSectionStatus, language: uiLanguage)) {
+                LabeledContent(
+                    L10n.text(L10nKey.settingsModel, language: uiLanguage),
+                    value: configurationStore.selectedModel.title
+                )
+                LabeledContent(
+                    L10n.text(L10nKey.settingsCurrentState, language: uiLanguage),
+                    value: configurationStore.readinessText
+                )
             }
 
             Section(L10n.text(L10nKey.settingsSectionLanguageHint, language: uiLanguage)) {
-                Picker(L10n.text(L10nKey.settingsSectionLanguageHint, language: uiLanguage), selection: unifiedLanguageHintBinding) {
-                    ForEach(WhisperTranscriptionLanguage.allCases) { hint in
+                Picker(L10n.text(L10nKey.settingsSectionLanguageHint, language: uiLanguage), selection: languageHintBinding) {
+                    ForEach(STTLanguageHint.allCases) { hint in
                         Text(hint.title(in: uiLanguage)).tag(hint)
                     }
                 }
@@ -380,17 +352,14 @@ struct SettingsView: View {
 
             Section(L10n.text(L10nKey.settingsSectionModel, language: uiLanguage)) {
                 HStack(spacing: 8) {
-                    Picker(L10n.text(L10nKey.settingsModel, language: uiLanguage), selection: $selectedUnifiedModelID) {
-                        ForEach(currentEngineModelOptions) { option in
-                            Text(modelOptionTitle(for: option)).tag(option.id)
+                    Picker(L10n.text(L10nKey.settingsModel, language: uiLanguage), selection: $configurationStore.selectedModelID) {
+                        ForEach(STTModelOption.allCases) { option in
+                            Text(modelOptionTitle(for: option)).tag(option.rawValue)
                         }
                     }
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .onChange(of: selectedUnifiedModelID) { newID in
-                        applyUnifiedModelSelection(newID)
-                    }
 
                     Button(selectedModelInstalled
                         ? L10n.text(L10nKey.settingsDelete, language: uiLanguage)
@@ -402,55 +371,27 @@ struct SettingsView: View {
                     .disabled(modelActionDisabled)
                 }
 
-                if let runtimeHint = selectedModelRuntimeHint {
-                    Text(runtimeHint)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
+                Text(configurationStore.selectedModel.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-                if configurationStore.isInstallingModel || configurationStore.isModelInstallPaused {
+                if configurationStore.isInstallingModel {
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            if let progress = configurationStore.modelInstallProgressFraction {
-                                ProgressView(value: progress)
-                                    .progressViewStyle(.linear)
-                            } else {
-                                ProgressView()
-                                    .progressViewStyle(.linear)
-                            }
-                            Button {
-                                if configurationStore.isModelInstallPaused {
-                                    configurationStore.startInstallSelectedModel()
-                                } else {
-                                    configurationStore.pauseModelInstallation()
-                                }
-                            } label: {
-                                Image(systemName: configurationStore.isModelInstallPaused ? "play.circle.fill" : "pause.circle.fill")
-                            }
-                            .buttonStyle(.plain)
-                            Button {
-                                configurationStore.cancelModelInstallation()
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                            }
-                            .buttonStyle(.plain)
+                        if let progress = configurationStore.modelInstallProgressFraction {
+                            ProgressView(value: progress)
+                                .progressViewStyle(.linear)
+                        } else {
+                            ProgressView()
+                                .progressViewStyle(.linear)
                         }
                         Text(configurationStore.modelInstallStatus)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text(configurationStore.modelInstallSizeText)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if qwenCLIService.isInstallingModel {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ProgressView()
-                            .progressViewStyle(.linear)
-                        Text(qwenCLIService.modelInstallStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if let transferText = configurationStore.modelInstallTransferText {
+                            Text(transferText)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -459,359 +400,49 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
-
-                if let qwenModelInstallError = qwenCLIService.modelInstallError {
-                    Label(qwenModelInstallError, systemImage: "xmark.octagon.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
             }
         }
         .formStyle(.grouped)
-        .onAppear {
-            qwenCLIService.refreshEnvironment()
-            syncUnifiedModelSelectionFromConfiguration()
-        }
-        .onChange(of: configurationStore.backend) { _ in
-            syncUnifiedModelSelectionFromConfiguration()
-        }
-        .onChange(of: configurationStore.selectedModelFileName) { _ in
-            guard configurationStore.backend == .whisperCpp else { return }
-            syncUnifiedModelSelectionFromConfiguration()
-        }
-        .onChange(of: configurationStore.qwenModelName) { _ in
-            guard configurationStore.backend == .qwen3ASRServer else { return }
-            syncUnifiedModelSelectionFromConfiguration()
-        }
-        .alert(L10n.text(L10nKey.settingsAlertInstallWhisperTitle, language: uiLanguage), isPresented: $isWhisperInstallHintPresented) {
-            Button(L10n.text(L10nKey.commonOk, language: uiLanguage), role: .cancel) { }
-        } message: {
-            Text(L10n.text(L10nKey.settingsAlertInstallWhisperMessage, language: uiLanguage))
-        }
-        .alert(L10n.text(L10nKey.settingsAlertInstallQwenTitle, language: uiLanguage), isPresented: $isQwenInstallHintPresented) {
-            Button(L10n.text(L10nKey.commonOk, language: uiLanguage), role: .cancel) { }
-        } message: {
-            Text(L10n.text(L10nKey.settingsAlertInstallQwenMessage, language: uiLanguage))
-        }
-    }
-
-    private var unifiedModelOptions: [UnifiedModelOption] {
-        let whisperOptions = WhisperModelSize.allCases.map { size in
-            UnifiedModelOption.whisper(WhisperModelCatalog.descriptor(size: size, language: .chinese))
-        }
-        let qwenOptions = QwenASRModelPreset.allCases.map { UnifiedModelOption.qwen($0) }
-        return whisperOptions + qwenOptions
-    }
-
-    private var currentEngineModelOptions: [UnifiedModelOption] {
-        switch configurationStore.backend {
-        case .whisperCpp:
-            return unifiedModelOptions.filter {
-                if case .whisper = $0 { return true }
-                return false
-            }
-        case .qwen3ASRServer:
-            return unifiedModelOptions.filter {
-                if case .qwen = $0 { return true }
-                return false
-            }
-        }
-    }
-
-    private var selectedEngineRuntimeInstalled: Bool {
-        switch configurationStore.backend {
-        case .whisperCpp:
-            return configurationStore.isWhisperRuntimeInstalled
-        case .qwen3ASRServer:
-            return qwenCLIService.isRuntimeInstalled
-        }
-    }
-
-    private var currentRuntimeStatusTitle: String {
-        selectedEngineRuntimeInstalled
-            ? L10n.text(L10nKey.settingsInstalled, language: uiLanguage)
-            : L10n.text(L10nKey.settingsNotInstalled, language: uiLanguage)
-    }
-
-    private var currentRuntimeStatusColor: Color {
-        selectedEngineRuntimeInstalled ? .green : .orange
-    }
-
-    private var selectedUnifiedModel: UnifiedModelOption? {
-        currentEngineModelOptions.first(where: { $0.id == selectedUnifiedModelID })
     }
 
     private var selectedModelInstalled: Bool {
-        guard let selectedUnifiedModel else { return false }
-        switch selectedUnifiedModel {
-        case let .whisper(descriptor):
-            return configurationStore.installedModels.contains { $0.fileName == descriptor.fileName }
-        case let .qwen(preset):
-            return qwenCLIService.isModelInstalled(modelIdentifier: preset.rawValue)
-        }
-    }
-
-    private var selectedModelRuntimeInstalled: Bool {
-        guard let selectedUnifiedModel else { return false }
-        switch selectedUnifiedModel {
-        case .whisper:
-            return configurationStore.isWhisperRuntimeInstalled
-        case .qwen:
-            return qwenCLIService.isRuntimeInstalled
-        }
-    }
-
-    private var selectedModelRuntimeHint: String? {
-        guard let selectedUnifiedModel, !selectedModelRuntimeInstalled else { return nil }
-        switch selectedUnifiedModel {
-        case .whisper:
-            return L10n.text(L10nKey.settingsRuntimeHintWhisper, language: uiLanguage)
-        case .qwen:
-            return L10n.text(L10nKey.settingsRuntimeHintQwen, language: uiLanguage)
-        }
+        configurationStore.isModelInstalled(configurationStore.selectedModel)
     }
 
     private var modelActionDisabled: Bool {
-        guard let selectedUnifiedModel else { return true }
-        if !selectedModelRuntimeInstalled {
-            return true
-        }
-        switch selectedUnifiedModel {
-        case .whisper:
-            return configurationStore.isInstallingModel
-        case .qwen:
-            return qwenCLIService.isInstallingModel
-        }
+        configurationStore.isInstallingModel
     }
 
-    private var unifiedLanguageHintBinding: Binding<WhisperTranscriptionLanguage> {
+    private var languageHintBinding: Binding<STTLanguageHint> {
         Binding(
             get: {
-                switch configurationStore.backend {
-                case .whisperCpp:
-                    return WhisperTranscriptionLanguage
-                        .fromTranscriptionLanguageCode(configurationStore.language) ?? .auto
-                case .qwen3ASRServer:
-                    switch QwenLanguageHint.fromPersistedCode(configurationStore.qwenLanguageHint) ?? .auto {
-                    case .auto:
-                        return .auto
-                    case .chinese:
-                        return .chinese
-                    case .english:
-                        return .english
-                    }
-                }
+                configurationStore.languageHint
             },
             set: { newHint in
-                configurationStore.language = newHint.transcriptionLanguageCode
-                switch newHint {
-                case .auto:
-                    configurationStore.qwenLanguageHint = QwenLanguageHint.auto.persistedCode
-                case .chinese:
-                    configurationStore.qwenLanguageHint = QwenLanguageHint.chinese.persistedCode
-                case .english:
-                    configurationStore.qwenLanguageHint = QwenLanguageHint.english.persistedCode
-                }
+                configurationStore.languageHintCode = newHint.transcriptionLanguageCode
             }
         )
     }
 
-    private func modelOptionTitle(for option: UnifiedModelOption) -> String {
+    private func modelOptionTitle(for option: STTModelOption) -> String {
         let installed: Bool
-        switch option {
-        case let .whisper(descriptor):
-            installed = configurationStore.installedModels.contains { $0.fileName == descriptor.fileName }
-        case let .qwen(preset):
-            installed = qwenCLIService.isModelInstalled(modelIdentifier: preset.rawValue)
-        }
+        installed = configurationStore.isModelInstalled(option)
         let status = installed
             ? L10n.text(L10nKey.settingsInstalled, language: uiLanguage)
             : L10n.text(L10nKey.settingsNotInstalled, language: uiLanguage)
         return L10n.text(L10nKey.settingsModelOptionFormat, language: uiLanguage, option.title, status)
     }
 
-    private func handleRuntimeInstallAction() {
-        switch configurationStore.backend {
-        case .whisperCpp:
-            isWhisperInstallHintPresented = true
-        case .qwen3ASRServer:
-            isQwenInstallHintPresented = true
-        }
-    }
-
-    private func handleRuntimeDetectAction() {
-        switch configurationStore.backend {
-        case .whisperCpp:
-            configurationStore.autoDetectExecutable()
-        case .qwen3ASRServer:
-            configurationStore.autoDetectQwenExecutable()
-            qwenCLIService.refreshEnvironment()
-            if configurationStore.qwenCLIPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               let detected = qwenCLIService.qwenCLIPath {
-                configurationStore.qwenCLIPath = detected
-            }
-        }
-    }
-
-    private func syncUnifiedModelSelectionFromConfiguration() {
-        switch configurationStore.backend {
-        case .whisperCpp:
-            let candidateFile = configurationStore.selectedModelFileName.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let option = currentEngineModelOptions.first(where: { option in
-                if case let .whisper(descriptor) = option {
-                    return descriptor.fileName == candidateFile
-                }
-                return false
-            }) {
-                selectedUnifiedModelID = option.id
-                return
-            }
-            selectedUnifiedModelID = configurationStore.selectedModelDescriptor.fileName.unifiedWhisperID
-        case .qwen3ASRServer:
-            if let preset = QwenASRModelPreset(rawValue: configurationStore.qwenModelName) {
-                selectedUnifiedModelID = preset.unifiedQwenID
-                qwenCLIService.selectedPreset = preset
-                return
-            }
-            selectedUnifiedModelID = QwenASRModelPreset.model0_6B.unifiedQwenID
-            qwenCLIService.selectedPreset = .model0_6B
-        }
-    }
-
-    private func applyUnifiedModelSelection(_ modelID: String) {
-        guard let option = currentEngineModelOptions.first(where: { $0.id == modelID }) else { return }
-        switch option {
-        case let .whisper(descriptor):
-            configurationStore.backend = .whisperCpp
-            configurationStore.selectedModelSize = descriptor.size
-            configurationStore.selectedModelLanguage = descriptor.language
-            configurationStore.selectedModelFileName = descriptor.fileName
-            if configurationStore.modelDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               let defaultPath = try? WhisperModelInstallerService.modelsDirectoryPath() {
-                configurationStore.modelDirectoryPath = defaultPath
-            }
-        case let .qwen(preset):
-            configurationStore.backend = .qwen3ASRServer
-            configurationStore.qwenModelName = preset.rawValue
-            qwenCLIService.selectedPreset = preset
-        }
-    }
-
     private func handleSelectedModelAction() {
-        guard let selectedUnifiedModel else { return }
         if selectedModelInstalled {
-            switch selectedUnifiedModel {
-            case let .whisper(descriptor):
-                configurationStore.selectedModelFileName = descriptor.fileName
-                configurationStore.deleteSelectedModel()
-            case let .qwen(preset):
-                qwenCLIService.selectedPreset = preset
-                configurationStore.qwenModelName = preset.rawValue
-                qwenCLIService.uninstallSelectedModel()
+            Task {
+                await configurationStore.deleteSelectedModel()
             }
             return
         }
 
-        switch selectedUnifiedModel {
-        case let .whisper(descriptor):
-            configurationStore.selectedModelSize = descriptor.size
-            configurationStore.selectedModelLanguage = descriptor.language
-            configurationStore.selectedModelFileName = descriptor.fileName
-            configurationStore.backend = .whisperCpp
-            configurationStore.startInstallSelectedModel()
-        case let .qwen(preset):
-            qwenCLIService.selectedPreset = preset
-            configurationStore.qwenModelName = preset.rawValue
-            configurationStore.backend = .qwen3ASRServer
-            Task {
-                await qwenCLIService.installSelectedModel()
-                configurationStore.qwenModelName = qwenCLIService.selectedPreset.rawValue
-            }
+        Task {
+            await configurationStore.installSelectedModel()
         }
-    }
-
-    private func permissionRow(
-        title: String,
-        state: PermissionState,
-        requestAction: @escaping () -> Void,
-        openSettingsAction: @escaping () -> Void
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text(title)
-                Spacer()
-                Text(permissionStateTitle(state))
-                    .font(.caption)
-                    .foregroundStyle(permissionStateColor(state))
-            }
-
-            HStack(spacing: 8) {
-                Button(L10n.text(L10nKey.permissionRequest, language: uiLanguage), action: requestAction)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                Button(L10n.text(L10nKey.permissionOpenSettings, language: uiLanguage), action: openSettingsAction)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
-        }
-    }
-
-    private func permissionStateTitle(_ state: PermissionState) -> String {
-        switch state {
-        case .authorized:
-            return L10n.text(L10nKey.permissionAuthorized, language: uiLanguage)
-        case .denied:
-            return L10n.text(L10nKey.permissionDenied, language: uiLanguage)
-        case .restricted:
-            return L10n.text(L10nKey.permissionRestricted, language: uiLanguage)
-        case .notDetermined:
-            return L10n.text(L10nKey.permissionNotDetermined, language: uiLanguage)
-        }
-    }
-
-private func permissionStateColor(_ state: PermissionState) -> Color {
-        switch state {
-        case .authorized:
-            return .green
-        case .denied, .restricted:
-            return .red
-        case .notDetermined:
-            return .orange
-        }
-    }
-}
-
-private enum UnifiedModelOption: Identifiable {
-    case whisper(WhisperModelDescriptor)
-    case qwen(QwenASRModelPreset)
-
-    var id: String {
-        switch self {
-        case let .whisper(descriptor):
-            return descriptor.fileName.unifiedWhisperID
-        case let .qwen(preset):
-            return preset.unifiedQwenID
-        }
-    }
-
-    var title: String {
-        switch self {
-        case let .whisper(descriptor):
-            return "Whisper \(descriptor.displayName)"
-        case let .qwen(preset):
-            return "Qwen3-ASR (\(preset.approximateSizeText))"
-        }
-    }
-}
-
-private extension String {
-    var unifiedWhisperID: String {
-        "whisper::\(self)"
-    }
-}
-
-private extension QwenASRModelPreset {
-    var unifiedQwenID: String {
-        "qwen::\(rawValue)"
     }
 }

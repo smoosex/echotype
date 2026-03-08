@@ -1,6 +1,6 @@
 import Foundation
 
-enum TextInjectionMode: String, CaseIterable, Identifiable {
+enum TextInjectionMode: String, CaseIterable, Identifiable, Sendable {
     case clipboardOnly
     case clipboardThenPaste
 
@@ -20,27 +20,42 @@ enum TextInjectionMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum TextInjectionResult: String {
+enum TextInjectionResult: Equatable, Sendable {
     case clipboardOnly
-    case pasted
+    case pasteShortcutSent
+    case fallbackToClipboard(PasteShortcutFailureReason)
+
+    var persistenceValue: String {
+        switch self {
+        case .clipboardOnly:
+            return "clipboard_only"
+        case .pasteShortcutSent:
+            return "paste_shortcut_sent"
+        case .fallbackToClipboard:
+            return "fallback_to_clipboard"
+        }
+    }
 }
 
-enum TextInjectionError: LocalizedError {
+enum PasteShortcutFailureReason: Equatable, Sendable {
+    case accessibilityPermissionDenied
+    case eventSourceUnavailable
+    case eventCreationFailed
+}
+
+enum TextInjectionError: LocalizedError, Sendable {
     case clipboardFailed
-    case pasteFailed
 
     var errorDescription: String? {
         let language = AppLanguage.current()
         switch self {
         case .clipboardFailed:
             return L10n.text(L10nKey.errorClipboardFailed, language: language)
-        case .pasteFailed:
-            return L10n.text(L10nKey.errorPasteFailed, language: language)
         }
     }
 }
 
-final class TextInjectionService {
+final class TextInjectionService: @unchecked Sendable {
     private let clipboardInjector = ClipboardInjector()
     private let pasteInjector = PasteShortcutInjector()
 
@@ -53,11 +68,11 @@ final class TextInjectionService {
             return .clipboardOnly
         }
 
-        if pasteInjector.pasteFromClipboard() {
-            return .pasted
+        switch pasteInjector.sendPasteShortcut() {
+        case .sent:
+            return .pasteShortcutSent
+        case .failed(let reason):
+            return .fallbackToClipboard(reason)
         }
-
-        // Auto-paste failed, but clipboard path already succeeded.
-        return .clipboardOnly
     }
 }

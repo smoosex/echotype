@@ -4,9 +4,8 @@ import Combine
 @MainActor
 final class AppModel: ObservableObject {
     let stateStore = AppStateStore()
-    let whisperConfigurationStore = WhisperConfigurationStore()
+    let sttConfigurationStore = STTConfigurationStore()
     let preferencesStore = AppPreferencesStore()
-    let qwenCLIService = QwenCLIService()
 
     @Published private(set) var hotkeyHint = HotkeyShortcut.defaultShortcut.hint
     @Published private(set) var hotkeyGlyphHint = HotkeyShortcut.defaultShortcut.glyphHint
@@ -40,34 +39,20 @@ final class AppModel: ObservableObject {
     private let performanceReportService = PerformanceReportService()
     private let stabilitySelfTestService = StabilitySelfTestService()
     private let onboardingDefaultsKey = "onboarding.completed"
-    private var isMenuPaneVisible = false
+    private let minimumPerformanceSamples = 20
     private var lastKnownShortcut = HotkeyShortcut.defaultShortcut
     private var onboardingDontShowAgainSelection = false
     private var openSettingsWindowHandler: (() -> Void)?
     private var onboardingAutoPresentationTask: DispatchWorkItem?
-    private var transcriptionHintState: TranscriptionHintState = .readiness
-    private var injectionStatusState: InjectionStatusState = .idle
+    private var pipelineFeedback: PipelineFeedback = .readiness
+    private var performanceBaselineReport: PerformanceBaselineReport?
     private var selfTestExecuted = false
     private var cancellables = Set<AnyCancellable>()
-
-    private enum TranscriptionHintState {
-        case readiness
-        case processing
-        case success
-        case error(String)
-    }
-
-    private enum InjectionStatusState {
-        case idle
-        case pasted
-        case copied
-        case skipped
-    }
 
     init() {
         let initialLanguage = preferencesStore.appLanguage
         currentLanguage = initialLanguage
-        transcriptionHint = whisperConfigurationStore.readinessText
+        transcriptionHint = ""
         injectionStatus = L10n.text(L10nKey.appInjectionIdle, language: initialLanguage)
         performanceSummary = L10n.text(L10nKey.appPerformanceNoSamples, language: initialLanguage)
         metricsDirectoryPath = L10n.text(L10nKey.appMetricsNA, language: initialLanguage)
@@ -76,11 +61,16 @@ final class AppModel: ObservableObject {
         onboardingDontShowAgainSelection = onboardingCompleted
         metricsDirectoryPath = performanceReportService.metricsDirectoryPath()
         bindLanguageChanges()
+        bindSTTConfigurationChanges()
         bindRecordingLevelChanges()
         refreshPermissionStates()
+        applyPipelineFeedback(.readiness)
         refreshPerformanceSummary()
         configureHotkey()
         scheduleOnboardingPresentationIfNeeded()
+        Task { [weak self] in
+            await self?.loadPersistedPerformanceReport()
+        }
     }
 
     private func bindLanguageChanges() {
@@ -89,14 +79,24 @@ final class AppModel: ObservableObject {
             .sink { [weak self] language in
                 guard let self else { return }
                 currentLanguage = language
-                transcriptionHint = localizedTranscriptionHint()
-                injectionStatus = localizedInjectionStatus()
+                applyPipelineFeedback(pipelineFeedback)
                 if !selfTestExecuted {
                     selfTestSummary = L10n.text(L10nKey.appSelfTestNotRun, language: language)
                 }
                 refreshPerformanceSummary()
                 applyHotkeyPresentation(shortcut: lastKnownShortcut, enabled: hotkeyEnabled)
                 refreshOnboardingWindowIfNeeded()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func bindSTTConfigurationChanges() {
+        sttConfigurationStore.$readinessRevision
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                guard case .readiness = pipelineFeedback else { return }
+                applyPipelineFeedback(.readiness)
             }
             .store(in: &cancellables)
     }
@@ -121,8 +121,6 @@ final class AppModel: ObservableObject {
             stopRecordingFlow()
         case .processing:
             break
-        case .error:
-            stateStore.reset()
         }
     }
 
@@ -189,9 +187,7 @@ final class AppModel: ObservableObject {
         onboardingAutoPresentationTask = nil
         onboardingWindowService.close()
         applyOnboardingPreference(dontShowAgain: dontShowAgain)
-        DispatchQueue.main.async { [weak self] in
-            self?.openSettingsWindow()
-        }
+        openSettingsWindow()
     }
 
     func openSettingsWindow() {
@@ -203,24 +199,17 @@ final class AppModel: ObservableObject {
     }
 
     func runStabilitySelfTest(iterations: Int = 200) {
-        let result = stabilitySelfTestService.run(
-            iterations: iterations,
-            stateStore: stateStore,
-            textInjectionService: textInjectionService
-        )
-        selfTestExecuted = true
-        selfTestSummary = result.summary
-        AppLogger.app.info("Stability self-test completed: \(result.summary)")
-    }
-
-    func menuPaneDidOpen() {
-        guard !isMenuPaneVisible else { return }
-        isMenuPaneVisible = true
-    }
-
-    func menuPaneDidClose() {
-        guard isMenuPaneVisible else { return }
-        isMenuPaneVisible = false
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await stabilitySelfTestService.run(
+                iterations: iterations,
+                stateStore: stateStore,
+                textInjectionService: textInjectionService
+            )
+            selfTestExecuted = true
+            selfTestSummary = result.summary
+            AppLogger.app.info("Stability self-test completed: \(result.summary)")
+        }
     }
 
     func setHotkeyEnabled(_ enabled: Bool) -> String? {
@@ -402,11 +391,15 @@ final class AppModel: ObservableObject {
         do {
             try audioService.startRecording()
             stateStore.startRecording()
+            lastTranscription = nil
+            lastAudioValidation = nil
             showRecordingOverlay()
+            applyPipelineFeedback(.readiness)
             AppLogger.audio.info("Recording started")
         } catch {
             hideRecordingOverlay()
-            stateStore.fail(error.localizedDescription)
+            stateStore.reset()
+            applyPipelineFeedback(.failure(error.localizedDescription))
             AppLogger.audio.error("Recording start failed: \(error.localizedDescription)")
         }
     }
@@ -469,38 +462,11 @@ final class AppModel: ObservableObject {
     private func stopRecordingFlow() {
         hideRecordingOverlay()
         lastTranscription = nil
-        transcriptionHintState = .processing
-        transcriptionHint = localizedTranscriptionHint()
         stateStore.startProcessing()
+        applyPipelineFeedback(.processing)
 
-        do {
-            let outputURL = try audioService.stopRecording()
-            lastRecordingFile = outputURL.lastPathComponent
-            AppLogger.audio.info("Recording stopped; output: \(outputURL.lastPathComponent)")
-
-            do {
-                let summary = try wavValidationService.validate(at: outputURL)
-                lastAudioValidation = summary.brief
-                AppLogger.audio.info("WAV validated: \(summary.brief)")
-
-                processMetricsSampler.start()
-                let pipelineStart = Date()
-                Task { [weak self] in
-                    await self?.runTranscription(
-                        audioURL: outputURL,
-                        audioDurationSeconds: summary.durationSeconds,
-                        pipelineStart: pipelineStart
-                    )
-                }
-            } catch {
-                stateStore.fail(error.localizedDescription)
-                AppLogger.audio.error("WAV validation failed: \(error.localizedDescription)")
-                return
-            }
-        } catch {
-            hideRecordingOverlay()
-            stateStore.fail(error.localizedDescription)
-            AppLogger.audio.error("Recording stop failed: \(error.localizedDescription)")
+        Task { [weak self] in
+            await self?.finalizeRecordingFlow()
         }
     }
 
@@ -531,33 +497,25 @@ final class AppModel: ObservableObject {
         var pipelineError: String?
 
         do {
-            let configuration = whisperConfigurationStore.makeConfiguration()
+            let configuration = sttConfigurationStore.makeConfiguration()
             let sttService = STTService(configuration: configuration)
             let sttStart = Date()
             let text = try await sttService.transcribe(audioURL: audioURL)
             sttDurationSeconds = Date().timeIntervalSince(sttStart)
-            lastTranscription = text
-            transcriptionHintState = .success
-            transcriptionHint = localizedTranscriptionHint()
             AppLogger.stt.info("Transcription succeeded")
             let injectionResult = try textInjectionService.inject(
                 text: text,
                 mode: preferencesStore.injectionMode
             )
-            injectionStatusState = injectionResult == .pasted ? .pasted : .copied
-            injectionStatus = localizedInjectionStatus()
-            injectionResultValue = injectionResult.rawValue
-            AppLogger.injection.info("Injection result: \(injectionResult.rawValue)")
+            injectionResultValue = injectionResult.persistenceValue
+            AppLogger.injection.info("Injection result: \(injectionResult.persistenceValue)")
+            applyPipelineFeedback(.success(transcription: text, injectionResult: injectionResult))
             success = true
             stateStore.reset()
         } catch {
-            lastTranscription = nil
-            transcriptionHintState = .error(error.localizedDescription)
-            transcriptionHint = localizedTranscriptionHint()
-            injectionStatusState = .skipped
-            injectionStatus = localizedInjectionStatus()
             AppLogger.stt.error("Transcription failed: \(error.localizedDescription)")
             pipelineError = error.localizedDescription
+            applyPipelineFeedback(.failure(error.localizedDescription))
             stateStore.reset()
         }
 
@@ -576,38 +534,97 @@ final class AppModel: ObservableObject {
             errorMessage: pipelineError,
             processMetrics: processMetrics
         )
-        performanceReportService.appendRun(run)
+        let report = await performanceReportService.appendRunAndRefresh(
+            run,
+            minSamples: minimumPerformanceSamples
+        )
+        performanceBaselineReport = report
         refreshPerformanceSummary()
     }
 
-    private func localizedTranscriptionHint() -> String {
-        switch transcriptionHintState {
+    private func localizedTranscriptionHint(for feedback: PipelineFeedback) -> String {
+        switch feedback {
         case .readiness:
-            return whisperConfigurationStore.readinessText
+            return sttConfigurationStore.readinessText
         case .processing:
             return L10n.text(L10nKey.appTranscriptionProcessing, language: currentLanguage)
         case .success:
             return L10n.text(L10nKey.appTranscriptionSuccess, language: currentLanguage)
-        case let .error(message):
+        case let .failure(message):
             return L10n.text(L10nKey.appTranscriptionErrorFormat, language: currentLanguage, message)
         }
     }
 
-    private func localizedInjectionStatus() -> String {
-        switch injectionStatusState {
-        case .idle:
+    private func localizedInjectionStatus(for feedback: PipelineFeedback) -> String {
+        switch feedback {
+        case .readiness, .processing:
             return L10n.text(L10nKey.appInjectionIdle, language: currentLanguage)
-        case .pasted:
-            return L10n.text(L10nKey.appInjectionPasted, language: currentLanguage)
-        case .copied:
-            return L10n.text(L10nKey.appInjectionCopied, language: currentLanguage)
-        case .skipped:
+        case let .success(_, injectionResult):
+            switch injectionResult {
+            case .clipboardOnly:
+                return L10n.text(L10nKey.appInjectionCopied, language: currentLanguage)
+            case .pasteShortcutSent:
+                return L10n.text(L10nKey.appInjectionPasted, language: currentLanguage)
+            case .fallbackToClipboard:
+                return L10n.text(L10nKey.appInjectionFallbackCopied, language: currentLanguage)
+            }
+        case .failure:
             return L10n.text(L10nKey.appInjectionSkipped, language: currentLanguage)
         }
     }
 
+    private func applyPipelineFeedback(_ feedback: PipelineFeedback) {
+        pipelineFeedback = feedback
+
+        switch feedback {
+        case .success(let transcription, _):
+            lastTranscription = transcription
+        case .processing, .readiness, .failure:
+            if case .failure = feedback {
+                lastTranscription = nil
+            }
+        }
+
+        transcriptionHint = localizedTranscriptionHint(for: feedback)
+        injectionStatus = localizedInjectionStatus(for: feedback)
+    }
+
+    private func finalizeRecordingFlow() async {
+        do {
+            let outputURL = try await audioService.stopRecording()
+            lastRecordingFile = outputURL.lastPathComponent
+            AppLogger.audio.info("Recording stopped; output: \(outputURL.lastPathComponent)")
+
+            let summary = try wavValidationService.validate(at: outputURL)
+            lastAudioValidation = summary.brief
+            AppLogger.audio.info("WAV validated: \(summary.brief)")
+
+            processMetricsSampler.start()
+            let pipelineStart = Date()
+            await runTranscription(
+                audioURL: outputURL,
+                audioDurationSeconds: summary.durationSeconds,
+                pipelineStart: pipelineStart
+            )
+        } catch {
+            stateStore.reset()
+            applyPipelineFeedback(.failure(error.localizedDescription))
+            AppLogger.audio.error("Recording pipeline failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadPersistedPerformanceReport() async {
+        let report = await performanceReportService.loadOrGenerateBaselineReport(minSamples: minimumPerformanceSamples)
+        performanceBaselineReport = report
+        refreshPerformanceSummary()
+    }
+
     private func refreshPerformanceSummary() {
-        let report = performanceReportService.generateAndPersistBaselineReport(minSamples: 20)
+        guard let report = performanceBaselineReport else {
+            performanceSummary = L10n.text(L10nKey.appPerformanceNoSamples, language: currentLanguage)
+            return
+        }
+
         let readiness = report.readiness == "ready"
             ? L10n.text(L10nKey.appPerformanceReadinessReady, language: currentLanguage)
             : L10n.text(L10nKey.appPerformanceReadinessCollecting, language: currentLanguage)

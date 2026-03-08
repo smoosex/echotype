@@ -13,32 +13,12 @@ struct EchoTypeMenuBarApp: App {
 
         MenuBarExtra("EchoType", systemImage: appModel.stateStore.state.symbolName) {
             MenuBarContentView(
-                stateStore: model.stateStore,
                 appLanguage: model.currentLanguage,
                 hotkeyHint: model.hotkeyHint,
-                hotkeyError: model.hotkeyError,
-                lastRecordingFile: model.lastRecordingFile,
-                lastAudioValidation: model.lastAudioValidation,
-                lastTranscription: model.lastTranscription,
-                transcriptionHint: model.transcriptionHint,
-                injectionStatus: model.injectionStatus,
-                microphonePermission: model.microphonePermission,
-                accessibilityPermission: model.accessibilityPermission,
-                onRequestMicrophone: model.requestMicrophonePermission,
-                onRequestAccessibility: model.requestAccessibilityPermission,
                 onRefreshPermissions: model.refreshPermissions,
-                onOpenMicrophoneSettings: model.openMicrophoneSettings,
-                onOpenAccessibilitySettings: model.openAccessibilitySettings,
                 onboardingCompleted: model.onboardingCompleted,
                 onOpenWelcomeGuide: model.openWelcomeGuide,
                 onOpenSettings: openSettingsWindow,
-                performanceSummary: model.performanceSummary,
-                metricsDirectoryPath: model.metricsDirectoryPath,
-                selfTestSummary: model.selfTestSummary,
-                onRunSelfTest: { model.runStabilitySelfTest() },
-                onPaneOpen: model.menuPaneDidOpen,
-                onPaneClose: model.menuPaneDidClose,
-                onPrimaryAction: model.handlePrimaryAction,
                 onQuit: { NSApplication.shared.terminate(nil) }
             )
         }
@@ -47,9 +27,8 @@ struct EchoTypeMenuBarApp: App {
         Window(L10n.text(L10nKey.menuSettings, language: model.currentLanguage), id: "settings") {
             SettingsView(
                 stateStore: model.stateStore,
-                configurationStore: model.whisperConfigurationStore,
+                configurationStore: model.sttConfigurationStore,
                 preferencesStore: model.preferencesStore,
-                qwenCLIService: model.qwenCLIService,
                 microphonePermission: model.microphonePermission,
                 accessibilityPermission: model.accessibilityPermission,
                 hotkeyHint: model.hotkeyHint,
@@ -78,7 +57,6 @@ struct EchoTypeMenuBarApp: App {
     }
 
     private func openSettingsWindow() {
-        NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
         NSApp.activate(ignoringOtherApps: true)
         openWindow(id: "settings")
     }

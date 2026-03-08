@@ -1,6 +1,6 @@
 import Foundation
 
-struct StabilitySelfTestResult {
+struct StabilitySelfTestResult: Sendable {
     let iterations: Int
     let failures: Int
     let durationSeconds: Double
@@ -15,20 +15,21 @@ struct StabilitySelfTestResult {
     }
 }
 
-@MainActor
-final class StabilitySelfTestService {
+final class StabilitySelfTestService: @unchecked Sendable {
     func run(
         iterations: Int,
         stateStore: AppStateStore,
         textInjectionService: TextInjectionService
-    ) -> StabilitySelfTestResult {
+    ) async -> StabilitySelfTestResult {
         let start = Date()
         var failures = 0
 
         for index in 0..<iterations {
-            stateStore.reset()
-            stateStore.startRecording()
-            stateStore.startProcessing()
+            await MainActor.run {
+                stateStore.reset()
+                stateStore.startRecording()
+                stateStore.startProcessing()
+            }
 
             do {
                 _ = try textInjectionService.inject(text: "self-test-\(index)", mode: .clipboardOnly)
@@ -36,7 +37,13 @@ final class StabilitySelfTestService {
                 failures += 1
             }
 
-            stateStore.reset()
+            await MainActor.run {
+                stateStore.reset()
+            }
+
+            if index.isMultiple(of: 20) {
+                await Task.yield()
+            }
         }
 
         let duration = Date().timeIntervalSince(start)

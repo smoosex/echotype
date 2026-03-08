@@ -1,12 +1,12 @@
 import Foundation
 
-struct ProcessMetricsResult: Codable {
+struct ProcessMetricsResult: Codable, Sendable {
     let wallTimeSeconds: Double
     let cpuPercentEstimate: Double
     let peakResidentMemoryMB: Double
 }
 
-struct TranscriptionRunRecord: Codable {
+struct TranscriptionRunRecord: Codable, Sendable {
     let id: String
     let finishedAtISO8601: String
     let audioFileName: String
@@ -20,7 +20,7 @@ struct TranscriptionRunRecord: Codable {
     let processMetrics: ProcessMetricsResult?
 }
 
-struct PerformanceBaselineReport: Codable {
+struct PerformanceBaselineReport: Codable, Sendable {
     let generatedAtISO8601: String
     let sampleCount: Int
     let successfulRuns: Int

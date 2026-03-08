@@ -4,7 +4,6 @@ enum AppState: Equatable {
     case idle
     case recording
     case processing
-    case error(String)
 
     var title: String {
         title(in: .current())
@@ -18,8 +17,6 @@ enum AppState: Equatable {
             return L10n.text(L10nKey.stateRecording, language: language)
         case .processing:
             return L10n.text(L10nKey.stateProcessing, language: language)
-        case .error(let message):
-            return L10n.text(L10nKey.stateErrorFormat, language: language, message)
         }
     }
 
@@ -31,8 +28,6 @@ enum AppState: Equatable {
             return "waveform"
         case .processing:
             return "hourglass"
-        case .error:
-            return "exclamationmark.triangle"
         }
     }
 }

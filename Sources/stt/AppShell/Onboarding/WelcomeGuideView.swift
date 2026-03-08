@@ -55,20 +55,24 @@ struct WelcomeGuideView: View {
 
             GroupBox(L10n.text(L10nKey.welcomePermissions, language: appLanguage)) {
                 VStack(alignment: .leading, spacing: 12) {
-                    permissionRow(
+                    PermissionStatusRow(
+                        appLanguage: appLanguage,
                         title: L10n.text(L10nKey.permissionMicrophone, language: appLanguage),
                         state: microphonePermission,
                         requestAction: onRequestMicrophone,
-                        openSettingsAction: onOpenMicrophoneSettings
+                        openSettingsAction: onOpenMicrophoneSettings,
+                        prominentTitle: true
                     )
 
                     Divider()
 
-                    permissionRow(
+                    PermissionStatusRow(
+                        appLanguage: appLanguage,
                         title: L10n.text(L10nKey.permissionAccessibility, language: appLanguage),
                         state: accessibilityPermission,
                         requestAction: onRequestAccessibility,
-                        openSettingsAction: onOpenAccessibilitySettings
+                        openSettingsAction: onOpenAccessibilitySettings,
+                        prominentTitle: true
                     )
 
                     HStack(spacing: 8) {
@@ -97,7 +101,9 @@ struct WelcomeGuideView: View {
             }
 
             Toggle(L10n.text(L10nKey.welcomeDontShowAgain, language: appLanguage), isOn: $dontShowAgain)
-                .onChange(of: dontShowAgain) { onDontShowAgainChanged($0) }
+                .onChange(of: dontShowAgain) { _, newValue in
+                    onDontShowAgainChanged(newValue)
+                }
 
             HStack(spacing: 8) {
                 Spacer()
@@ -115,56 +121,5 @@ struct WelcomeGuideView: View {
         .padding(20)
         .frame(minWidth: 580, alignment: .topLeading)
         .onAppear(perform: onRefreshPermissions)
-    }
-
-    private func permissionRow(
-        title: String,
-        state: PermissionState,
-        requestAction: @escaping () -> Void,
-        openSettingsAction: @escaping () -> Void
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Text(permissionStateTitle(state))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(permissionStateColor(state))
-            }
-
-            HStack(spacing: 8) {
-                Button(L10n.text(L10nKey.permissionRequest, language: appLanguage), action: requestAction)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                Button(L10n.text(L10nKey.permissionOpenSettings, language: appLanguage), action: openSettingsAction)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
-        }
-    }
-
-    private func permissionStateTitle(_ state: PermissionState) -> String {
-        switch state {
-        case .authorized:
-            return L10n.text(L10nKey.permissionAuthorized, language: appLanguage)
-        case .denied:
-            return L10n.text(L10nKey.permissionDenied, language: appLanguage)
-        case .restricted:
-            return L10n.text(L10nKey.permissionRestricted, language: appLanguage)
-        case .notDetermined:
-            return L10n.text(L10nKey.permissionNotDetermined, language: appLanguage)
-        }
-    }
-
-    private func permissionStateColor(_ state: PermissionState) -> Color {
-        switch state {
-        case .authorized:
-            return .green
-        case .denied, .restricted:
-            return .red
-        case .notDetermined:
-            return .orange
-        }
     }
 }

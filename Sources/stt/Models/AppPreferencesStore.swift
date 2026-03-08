@@ -25,7 +25,10 @@ final class AppPreferencesStore: ObservableObject {
         static let hotkeyEnabled = "app.preferences.hotkey.enabled"
     }
 
+    private let defaults: UserDefaults
+
     init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         let rawMode = defaults.string(forKey: Keys.injectionMode) ?? TextInjectionMode.clipboardThenPaste.rawValue
         injectionMode = TextInjectionMode(rawValue: rawMode) ?? .clipboardThenPaste
         keepAudioFiles = defaults.bool(forKey: Keys.keepAudioFiles)
@@ -43,7 +46,6 @@ final class AppPreferencesStore: ObservableObject {
     }
 
     private func persist() {
-        let defaults = UserDefaults.standard
         defaults.set(injectionMode.rawValue, forKey: Keys.injectionMode)
         defaults.set(keepAudioFiles, forKey: Keys.keepAudioFiles)
         defaults.set(appLanguage.persistedCode, forKey: Keys.appLanguage)

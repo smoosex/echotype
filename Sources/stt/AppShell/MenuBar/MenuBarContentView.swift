@@ -2,32 +2,12 @@ import AppKit
 import SwiftUI
 
 struct MenuBarContentView: View {
-    @ObservedObject var stateStore: AppStateStore
     let appLanguage: AppLanguage
     let hotkeyHint: String
-    let hotkeyError: String?
-    let lastRecordingFile: String?
-    let lastAudioValidation: String?
-    let lastTranscription: String?
-    let transcriptionHint: String
-    let injectionStatus: String
-    let microphonePermission: PermissionState
-    let accessibilityPermission: PermissionState
-    let onRequestMicrophone: () -> Void
-    let onRequestAccessibility: () -> Void
     let onRefreshPermissions: () -> Void
-    let onOpenMicrophoneSettings: () -> Void
-    let onOpenAccessibilitySettings: () -> Void
     let onboardingCompleted: Bool
     let onOpenWelcomeGuide: () -> Void
     let onOpenSettings: () -> Void
-    let performanceSummary: String
-    let metricsDirectoryPath: String
-    let selfTestSummary: String
-    let onRunSelfTest: () -> Void
-    let onPaneOpen: () -> Void
-    let onPaneClose: () -> Void
-    let onPrimaryAction: () -> Void
     let onQuit: () -> Void
 
     var body: some View {
@@ -73,10 +53,6 @@ struct MenuBarContentView: View {
         }
         .padding(12)
         .frame(width: 300, alignment: .leading)
-        .onAppear {
-            onPaneOpen()
-            onRefreshPermissions()
-        }
-        .onDisappear(perform: onPaneClose)
+        .onAppear(perform: onRefreshPermissions)
     }
 }

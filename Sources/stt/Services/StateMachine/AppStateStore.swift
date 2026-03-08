@@ -14,10 +14,6 @@ final class AppStateStore: ObservableObject {
         state = .processing
     }
 
-    func fail(_ message: String) {
-        state = .error(message)
-    }
-
     func reset() {
         state = .idle
     }

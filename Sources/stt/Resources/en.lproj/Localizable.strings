@@ -8,7 +8,7 @@
 "menu.welcome_guide_new" = "Welcome Guide (New)";
 
 "settings.tab.general" = "General";
-"settings.tab.engine" = "Engine";
+"settings.tab.engine" = "Models";
 "settings.section.language" = "Language";
 "settings.language" = "Language";
 "settings.section.status" = "Status";
@@ -34,22 +34,13 @@
 "settings.section.privacy" = "Privacy";
 "settings.keep_temp_audio" = "Keep temporary audio files";
 "settings.keep_temp_audio_help" = "Default is off. Audio files are deleted immediately after processing.";
-"settings.section.runtime" = "Runtime";
-"settings.engine" = "Engine";
 "settings.install" = "Install";
-"settings.detect" = "Detect";
 "settings.section.language_hint" = "Language Hint";
 "settings.section.model" = "Model";
 "settings.model" = "Model";
 "settings.delete" = "Delete";
 "settings.installed" = "Installed";
 "settings.not_installed" = "Not Installed";
-"settings.runtime_hint_whisper" = "Whisper model requires Whisper runtime. Install or detect Whisper runtime first.";
-"settings.runtime_hint_qwen" = "Qwen model requires qwen-asr-cli. Install or detect Qwen runtime first.";
-"settings.alert.install_whisper_title" = "Install Whisper Runtime";
-"settings.alert.install_whisper_message" = "Please install whisper.cpp via Homebrew:\nbrew install whisper-cpp";
-"settings.alert.install_qwen_title" = "Install Qwen Runtime";
-"settings.alert.install_qwen_message" = "Please install qwen-asr-cli first:\nbrew install qwen-asr-cli\nor\npython -m pip install qwen-asr-cli";
 "settings.model_option_format" = "%@ [%@]";
 
 "permission.microphone" = "Microphone";
@@ -70,7 +61,7 @@
 "welcome.step1" = "1. Press your global shortcut to start recording.";
 "welcome.step2" = "2. Press the shortcut again to stop and transcribe.";
 "welcome.step3" = "3. EchoType injects the text by your selected mode (copy or paste).";
-"welcome.step4" = "Tip: You can change Engine, Model, and shortcut in Settings.";
+"welcome.step4" = "Tip: You can change the speech model and shortcut in Settings.";
 "welcome.dont_show_again" = "Don't show this guide again";
 "welcome.close" = "Close";
 "welcome.start_using" = "Start Using EchoType";
@@ -89,18 +80,10 @@
 "error.clipboard_failed" = "Failed to write to clipboard.";
 "error.paste_failed" = "Failed to auto-paste.";
 
-"backend.whisper_cli" = "whisper.cpp (Local CLI)";
-"backend.qwen_cli" = "Qwen3-ASR (Local CLI)";
-"qwen_language.auto" = "Auto";
-"qwen_language.chinese" = "Chinese";
-"qwen_language.english" = "English";
-"whisper_language.chinese" = "Chinese";
-"whisper_language.english" = "English";
 "whisper_transcription.auto" = "Auto";
 "whisper_transcription.chinese" = "Chinese";
 "whisper_transcription.english" = "English";
 
-"app.transcription.configure_whisper" = "Configure Whisper in Settings";
 "app.injection.idle" = "Idle";
 "app.performance.no_samples" = "No performance samples yet";
 "app.metrics.na" = "N/A";
@@ -109,68 +92,31 @@
 "app.transcription.processing" = "Processing transcription...";
 "app.transcription.success" = "Last transcription succeeded";
 "app.transcription.error_format" = "EchoType error: %@";
-"app.injection.pasted" = "Injected: pasted";
+"app.injection.pasted" = "Injection: paste shortcut sent";
 "app.injection.copied" = "Injected: copied";
+"app.injection.fallback_copied" = "Injection: auto-paste unavailable, copied";
 "app.injection.skipped" = "Injection skipped";
 "app.performance.summary_with_p50_format" = "runs=%d success=%.0f%% p50=%.2fs p95=%@ (%@)";
 "app.performance.summary_basic_format" = "runs=%d success=%.0f%% (%@)";
 "app.performance.readiness_ready" = "ready";
 "app.performance.readiness_collecting" = "collecting";
 
-"whisper.ready" = "Ready";
-"whisper.missing_executable_path" = "Missing executable path";
-"whisper.missing_model_directory" = "Missing model directory";
-"whisper.missing_model_selection" = "Missing model selection";
-"whisper.missing_qwen_executable_path" = "Missing qwen-asr executable path";
-"whisper.missing_qwen_model_name" = "Missing Qwen model name";
-"whisper.invalid_qwen_language_hint" = "Invalid Qwen language hint";
-"whisper.path_invalid" = "Path invalid";
-"whisper.no_in_app_install_yet" = "No in-app model install yet.";
-"whisper.install_cancelling" = "Cancelling install...";
-"whisper.install_cancelled_removed" = "Install cancelled and partial file removed.";
-"whisper.install_pausing" = "Pausing install...";
-"whisper.install_already_installed" = "Selected model is already installed.";
-"whisper.install_resuming_format" = "Resuming download: %@";
-"whisper.install_downloading_format" = "Downloading model: %@";
-"whisper.install_installed_format" = "Model installed: %@";
-"whisper.install_paused_resume" = "Download paused. Resume to continue.";
-"whisper.install_interrupted_resume" = "Download interrupted. Resume to continue.";
-"whisper.install_failed" = "Model installation failed.";
-"whisper.install_recommended_already_installed" = "Recommended model is already installed.";
-"whisper.delete_failed" = "Model deletion failed.";
-"whisper.delete_no_selection" = "No selected model to delete.";
-"whisper.delete_deleted_format" = "Deleted model: %@";
-"whisper.delete_failed_with_detail_format" = "Failed to delete %@: %@";
+"stt.ready" = "Ready";
+"stt.selected_model_not_installed_format" = "%@ is not installed yet.";
+"stt.installing_format" = "Installing %@...";
+"stt.loading_format" = "Loading %@...";
+"stt.installed_format" = "%@ is installed.";
+"stt.deleting_format" = "Deleting %@...";
+"stt.deleted_format" = "Deleted %@.";
+"stt.install_failed" = "Model installation failed.";
+"stt.delete_failed_with_detail_format" = "Failed to delete %@: %@";
 
-"qwen.runtime_not_detected" = "qwen-asr CLI not detected.";
-"qwen.runtime_detected_format" = "qwen-asr detected: %@";
-"qwen.model_not_installed" = "Qwen model not installed.";
-"qwen.install_failed" = "Model installation failed.";
-"qwen.installing_format" = "Installing %@...";
-"qwen.installed_format" = "Installed %@.";
-"qwen.uninstalled_format" = "Uninstalled %@.";
-"qwen.uninstall_failed" = "Model uninstall failed.";
-
-"error.qwen_executable_not_available" = "qwen-asr executable is not available. Install qwen-asr-cli first.";
-"error.qwen_model_not_installed_format" = "Selected model is not installed locally: %@. Install it first.";
-"error.qwen_runtime_directory_unavailable" = "Unable to prepare local qwen model directory.";
-"error.command_failed_no_detail_format" = "Command failed (%d): %@";
-"error.command_failed_with_detail_format" = "Command failed (%d): %@\n%@";
-
-"error.invalid_model_download_response" = "Invalid model download response.";
-"error.model_download_failed_http_format" = "Model download failed with HTTP %d.";
-"error.downloaded_model_empty" = "Downloaded model file is empty.";
-"error.application_support_unavailable" = "Application Support directory is unavailable.";
-"error.model_already_installed_format" = "Model %@ is already installed.";
-"error.model_download_cancelled" = "Model download cancelled. Re-run install to resume from partial file.";
-
-"error.whisper_executable_not_found" = "whisper executable not found. Set WHISPER_CLI_PATH.";
-"error.whisper_model_not_configured" = "whisper model path not configured. Set WHISPER_MODEL_PATH.";
-"error.qwen_executable_not_found" = "qwen-asr executable not found. Install qwen-asr-cli or set QWEN_ASR_CLI_PATH.";
-"error.qwen_model_not_configured" = "Qwen3-ASR model name is not configured. Set QWEN_ASR_MODEL_NAME.";
-"error.whisper_process_failed_format" = "whisper process failed with code %d: %@";
-"error.qwen_process_failed_format" = "qwen-asr process failed with code %d: %@";
 "error.transcription_output_empty" = "transcription output text is empty.";
+"error.stt_model_not_installed_format" = "Selected model is not installed: %@.";
+"error.whisperkit_load_failed_format" = "Failed to load WhisperKit model: %@";
+"error.qwen_load_failed_format" = "Failed to load Qwen3-ASR model: %@";
+"error.stt_transcription_failed_format" = "Speech transcription failed: %@";
+"error.stt_timeout_format" = "Speech transcription timed out after %d seconds.";
 
 "hotkey.conflict.spotlight" = "May conflict with Spotlight (Command + Space).";
 "hotkey.conflict.input_source" = "May conflict with Input Source switch (Control + Space).";
