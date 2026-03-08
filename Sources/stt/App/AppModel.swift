@@ -40,7 +40,9 @@ final class AppModel: ObservableObject {
     private let stabilitySelfTestService = StabilitySelfTestService()
     private let onboardingDefaultsKey = "onboarding.completed"
     private let minimumPerformanceSamples = 20
+    private let overlayResultHoldDuration: Duration = .milliseconds(720)
     private struct RecordingPreparation {
+        let id: UUID
         let configuration: STTConfiguration
         let task: Task<Bool, Never>
     }
@@ -52,6 +54,10 @@ final class AppModel: ObservableObject {
     private var pipelineFeedback: PipelineFeedback = .readiness
     private var performanceBaselineReport: PerformanceBaselineReport?
     private var recordingPreparation: RecordingPreparation?
+    private var activeRecordingPreparationID: UUID?
+    private var isPreparingModel = false
+    private var recordingPreparationReady = false
+    private var overlaySessionID = UUID()
     private var selfTestExecuted = false
     private var cancellables = Set<AnyCancellable>()
 
@@ -397,10 +403,10 @@ final class AppModel: ObservableObject {
         do {
             try audioService.startRecording()
             stateStore.startRecording()
-            startRecordingPreparation()
             lastTranscription = nil
             lastAudioValidation = nil
             showRecordingOverlay()
+            startRecordingPreparation()
             applyPipelineFeedback(.readiness)
             AppLogger.audio.info("Recording started")
         } catch {
@@ -467,10 +473,11 @@ final class AppModel: ObservableObject {
     }
 
     private func stopRecordingFlow() {
-        hideRecordingOverlay()
         lastTranscription = nil
         stateStore.startProcessing()
         applyPipelineFeedback(.processing)
+        recordingOverlayWindowService.setPreparationAccessoryVisible(false)
+        recordingOverlayWindowService.updateMode(isPreparingModel ? .loading : .transcribing)
 
         Task { [weak self] in
             await self?.finalizeRecordingFlow()
@@ -479,6 +486,10 @@ final class AppModel: ObservableObject {
 
     private func startRecordingPreparation() {
         recordingPreparation?.task.cancel()
+        isPreparingModel = false
+        recordingPreparationReady = false
+        activeRecordingPreparationID = nil
+        recordingOverlayWindowService.setPreparationAccessoryVisible(false)
 
         let configuration = sttConfigurationStore.makeConfiguration()
         guard configuration.isModelInstalled else {
@@ -486,6 +497,8 @@ final class AppModel: ObservableObject {
             return
         }
 
+        isPreparingModel = true
+        recordingOverlayWindowService.setPreparationAccessoryVisible(true)
         let task = Task(priority: .utility) {
             do {
                 let sttService = STTService(configuration: configuration)
@@ -500,15 +513,29 @@ final class AppModel: ObservableObject {
             }
         }
 
-        recordingPreparation = RecordingPreparation(
+        let preparation = RecordingPreparation(
+            id: UUID(),
             configuration: configuration,
             task: task
         )
+        recordingPreparation = preparation
+        activeRecordingPreparationID = preparation.id
+
+        Task { [weak self] in
+            guard let self else { return }
+            let didAcquirePreparation = await task.value
+            self.handleRecordingPreparationCompletion(
+                id: preparation.id,
+                didAcquirePreparation: didAcquirePreparation
+            )
+        }
     }
 
-    private func finishRecordingPreparation(_ preparation: RecordingPreparation?) async {
+    private func finishRecordingPreparation(
+        _ preparation: RecordingPreparation?,
+        didAcquirePreparation: Bool
+    ) async {
         guard let preparation else { return }
-        let didAcquirePreparation = await preparation.task.value
         guard didAcquirePreparation else { return }
 
         let sttService = STTService(configuration: preparation.configuration)
@@ -516,11 +543,13 @@ final class AppModel: ObservableObject {
     }
 
     private func showRecordingOverlay() {
-        recordingOverlayWindowService.show()
+        overlaySessionID = UUID()
+        recordingOverlayWindowService.show(mode: .recording)
         recordingOverlayWindowService.updateLevel(recordingLevel)
     }
 
     private func hideRecordingOverlay() {
+        overlaySessionID = UUID()
         recordingOverlayWindowService.hide()
         recordingLevel = 0
     }
@@ -564,6 +593,8 @@ final class AppModel: ObservableObject {
 
         let endToEndSeconds = Date().timeIntervalSince(pipelineStart)
         let processMetrics = processMetricsSampler.stop()
+        recordingOverlayWindowService.updateMode(success ? .success : .failure)
+        let overlaySessionID = self.overlaySessionID
         let run = TranscriptionRunRecord(
             id: UUID().uuidString,
             finishedAtISO8601: ISO8601DateFormatter().string(from: Date()),
@@ -583,6 +614,7 @@ final class AppModel: ObservableObject {
         )
         performanceBaselineReport = report
         refreshPerformanceSummary()
+        await hideRecordingOverlayAfterResult(for: overlaySessionID)
     }
 
     private func localizedTranscriptionHint(for feedback: PipelineFeedback) -> String {
@@ -635,6 +667,7 @@ final class AppModel: ObservableObject {
     private func finalizeRecordingFlow() async {
         let preparation = recordingPreparation
         recordingPreparation = nil
+        var didAcquirePreparation = recordingPreparationReady
 
         do {
             let outputURL = try await audioService.stopRecording()
@@ -645,6 +678,11 @@ final class AppModel: ObservableObject {
             lastAudioValidation = summary.brief
             AppLogger.audio.info("WAV validated: \(summary.brief)")
 
+            if isPreparingModel {
+                didAcquirePreparation = await awaitRecordingPreparation(preparation)
+            }
+
+            recordingOverlayWindowService.updateMode(.transcribing)
             processMetricsSampler.start()
             let pipelineStart = Date()
             await runTranscription(
@@ -656,9 +694,51 @@ final class AppModel: ObservableObject {
             stateStore.reset()
             applyPipelineFeedback(.failure(error.localizedDescription))
             AppLogger.audio.error("Recording pipeline failed: \(error.localizedDescription)")
+            recordingOverlayWindowService.updateMode(.failure)
+            await hideRecordingOverlayAfterResult(for: overlaySessionID)
         }
 
-        await finishRecordingPreparation(preparation)
+        await finishRecordingPreparation(
+            preparation,
+            didAcquirePreparation: didAcquirePreparation
+        )
+        completeRecordingPreparationCycle(id: preparation?.id)
+    }
+
+    private func handleRecordingPreparationCompletion(
+        id: UUID,
+        didAcquirePreparation: Bool
+    ) {
+        guard activeRecordingPreparationID == id else { return }
+        isPreparingModel = false
+        recordingPreparationReady = didAcquirePreparation
+        recordingOverlayWindowService.setPreparationAccessoryVisible(false)
+    }
+
+    private func awaitRecordingPreparation(
+        _ preparation: RecordingPreparation?
+    ) async -> Bool {
+        guard let preparation else { return false }
+        let didAcquirePreparation = await preparation.task.value
+        handleRecordingPreparationCompletion(
+            id: preparation.id,
+            didAcquirePreparation: didAcquirePreparation
+        )
+        return didAcquirePreparation
+    }
+
+    private func completeRecordingPreparationCycle(id: UUID?) {
+        guard activeRecordingPreparationID == id else { return }
+        activeRecordingPreparationID = nil
+        isPreparingModel = false
+        recordingPreparationReady = false
+        recordingOverlayWindowService.setPreparationAccessoryVisible(false)
+    }
+
+    private func hideRecordingOverlayAfterResult(for sessionID: UUID) async {
+        try? await Task.sleep(for: overlayResultHoldDuration)
+        guard overlaySessionID == sessionID else { return }
+        hideRecordingOverlay()
     }
 
     private func loadPersistedPerformanceReport() async {

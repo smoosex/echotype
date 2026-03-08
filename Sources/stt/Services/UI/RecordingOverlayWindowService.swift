@@ -16,7 +16,7 @@ final class RecordingOverlayWindowService {
     private var hideTask: Task<Void, Never>?
     private var phaseTask: Task<Void, Never>?
 
-    func show() {
+    func show(mode: RecordingOverlayMode = .recording) {
         hideTask?.cancel()
         hideTask = nil
         phaseTask?.cancel()
@@ -27,6 +27,8 @@ final class RecordingOverlayWindowService {
         registerObserversIfNeeded()
         panel.alphaValue = 1
         panel.orderFrontRegardless()
+        setMode(mode)
+        setPreparationAccessoryVisible(false)
         levelStore.presentationPhase = .appearing
         levelStore.baseVisibilityProgress = 1
         levelStore.widthProgress = 0
@@ -89,12 +91,29 @@ final class RecordingOverlayWindowService {
             self.levelStore.baseVisibilityProgress = 0
             self.levelStore.widthProgress = 0
             self.levelStore.heightProgress = 0
+            self.levelStore.mode = .recording
+            self.levelStore.showsPreparationAccessory = false
+            self.levelStore.modeChangedAt = Date().timeIntervalSinceReferenceDate
             self.hideTask = nil
         }
     }
 
     func updateLevel(_ level: Double) {
         levelStore.level = min(max(level, 0), 1)
+    }
+
+    func updateMode(_ mode: RecordingOverlayMode) {
+        setMode(mode)
+    }
+
+    func setPreparationAccessoryVisible(_ isVisible: Bool) {
+        levelStore.showsPreparationAccessory = isVisible
+    }
+
+    private func setMode(_ mode: RecordingOverlayMode) {
+        guard levelStore.mode != mode else { return }
+        levelStore.mode = mode
+        levelStore.modeChangedAt = Date().timeIntervalSinceReferenceDate
     }
 
     private func ensurePanel() -> RecordingOverlayPanel {
