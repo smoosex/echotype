@@ -89,8 +89,11 @@ actor WhisperKitRuntimeStore {
         return text
     }
 
-    func invalidate(model: STTModelOption) {
+    func invalidate(model: STTModelOption) async {
         if cachedKey?.model == model {
+            if let whisperKit {
+                await whisperKit.unloadModels()
+            }
             whisperKit = nil
             cachedKey = nil
         }
@@ -100,6 +103,16 @@ actor WhisperKitRuntimeStore {
             loadingTasks[key]?.task.cancel()
             loadingTasks.removeValue(forKey: key)
         }
+    }
+
+    func invalidateAll() async {
+        if let whisperKit {
+            await whisperKit.unloadModels()
+        }
+        whisperKit = nil
+        cachedKey = nil
+        loadingTasks.values.forEach { $0.task.cancel() }
+        loadingTasks.removeAll()
     }
 
     private func resolveWhisperKit(for model: STTModelOption, folder: String) async throws -> WhisperKit {
@@ -227,6 +240,7 @@ actor Qwen3ASRRuntimeStore {
 
     func invalidate(model: STTModelOption) {
         if cachedModel == model {
+            qwenModel?.unload()
             qwenModel = nil
             cachedModel = nil
         }
@@ -234,6 +248,14 @@ actor Qwen3ASRRuntimeStore {
             loadingTask.task.cancel()
             loadingTasks.removeValue(forKey: model)
         }
+    }
+
+    func invalidateAll() {
+        qwenModel?.unload()
+        qwenModel = nil
+        cachedModel = nil
+        loadingTasks.values.forEach { $0.task.cancel() }
+        loadingTasks.removeAll()
     }
 
     private func resolveQwenModel(for model: STTModelOption) async throws -> Qwen3ASRModel {

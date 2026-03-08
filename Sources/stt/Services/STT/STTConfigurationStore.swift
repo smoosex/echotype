@@ -32,7 +32,7 @@ final class STTConfigurationStore: ObservableObject {
         didSet {
             persist()
             advanceReadinessRevision()
-            scheduleBackgroundPreloadIfNeeded()
+            scheduleBackgroundPreloadIfNeeded(previousModelID: oldValue)
         }
     }
 
@@ -462,17 +462,36 @@ final class STTConfigurationStore: ObservableObject {
         }
     }
 
-    private func scheduleBackgroundPreloadIfNeeded() {
+    private func scheduleBackgroundPreloadIfNeeded(previousModelID: String? = nil) {
         backgroundPreloadTask?.cancel()
 
         let configuration = makeConfiguration()
-        guard configuration.isModelInstalled else { return }
+        let previousModel = previousModelID.flatMap(STTModelOption.init(rawValue:))
+        let familyChanged = previousModel?.family != nil && previousModel?.family != configuration.selectedModel.family
+
+        guard configuration.isModelInstalled || familyChanged else { return }
 
         backgroundPreloadTask = Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.preloadModel(configuration)
-                AppLogger.stt.info("Background preload succeeded: \(configuration.selectedModel.title, privacy: .public)")
+                if configuration.isModelInstalled {
+                    try await self.preloadModel(configuration)
+                    AppLogger.stt.info("Background preload succeeded: \(configuration.selectedModel.title, privacy: .public)")
+                }
+
+                try Task.checkCancellation()
+
+                guard familyChanged,
+                      let previousModel,
+                      self.isStillSelectedModel(configuration.selectedModel)
+                else {
+                    return
+                }
+
+                await self.releaseRuntimeCache(for: previousModel.family)
+                AppLogger.stt.info(
+                    "Released runtime cache for previous model family: \(previousModel.family.rawValue, privacy: .public)"
+                )
             } catch is CancellationError {
                 AppLogger.stt.info("Background preload cancelled: \(configuration.selectedModel.title, privacy: .public)")
             } catch {
@@ -484,6 +503,19 @@ final class STTConfigurationStore: ObservableObject {
     private func preloadModel(_ configuration: STTConfiguration) async throws {
         let sttService = STTService(configuration: configuration)
         try await sttService.preload()
+    }
+
+    private func isStillSelectedModel(_ model: STTModelOption) -> Bool {
+        selectedModel == model
+    }
+
+    private func releaseRuntimeCache(for family: STTModelFamily) async {
+        switch family {
+        case .whisperKit:
+            await WhisperKitRuntimeStore.shared.invalidateAll()
+        case .qwen3ASR:
+            await Qwen3ASRRuntimeStore.shared.invalidateAll()
+        }
     }
 
     private func persist() {

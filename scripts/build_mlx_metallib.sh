@@ -64,7 +64,13 @@ if [[ "${#METAL_SRCS[@]}" -eq 0 ]]; then
 fi
 
 AIR_FILES=()
-for SRC in "${METAL_SRCS[@]}"; do
+TOTAL_SRCS="${#METAL_SRCS[@]}"
+echo "==> Compiling ${TOTAL_SRCS} MLX Metal sources"
+
+for INDEX in "${!METAL_SRCS[@]}"; do
+  SRC="${METAL_SRCS[$INDEX]}"
+  REL_PATH="${SRC#"$KERNELS_DIR/"}"
+  printf '==> [%d/%d] %s\n' "$((INDEX + 1))" "$TOTAL_SRCS" "$REL_PATH"
   KEY="$(printf '%s' "$SRC" | shasum -a 256 | awk '{print $1}' | cut -c1-16)"
   OUT_AIR="$TMP_DIR/$KEY.air"
   xcrun -sdk macosx metal \
@@ -82,5 +88,6 @@ for SRC in "${METAL_SRCS[@]}"; do
 done
 
 OUT_METALLIB="$OUT_DIR/mlx.metallib"
+echo "==> Linking mlx.metallib"
 xcrun -sdk macosx metallib "${AIR_FILES[@]}" -o "$OUT_METALLIB"
 echo "OK: wrote $OUT_METALLIB"

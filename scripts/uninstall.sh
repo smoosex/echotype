@@ -5,7 +5,12 @@ APP_NAME="EchoType"
 APP_BUNDLE_ID="com.smoose.echotype"
 APP_PATH="/Applications/EchoType.app"
 APP_SUPPORT_PATH="${HOME}/Library/Application Support/echotype"
+APP_MODELS_PATH="${APP_SUPPORT_PATH}/models"
+APP_WHISPER_MODELS_PATH="${APP_MODELS_PATH}/whisperkit"
+APP_QWEN_MODELS_PATH="${APP_MODELS_PATH}/qwen3asr"
+APP_METRICS_PATH="${APP_SUPPORT_PATH}/metrics"
 APP_CACHE_PATH="${HOME}/Library/Caches/echotype"
+LEGACY_QWEN_CACHE_PATH="${APP_CACHE_PATH}/qwen3-speech"
 PREFERENCES_PATH="${HOME}/Library/Preferences/${APP_BUNDLE_ID}.plist"
 
 ASSUME_YES=false
@@ -20,7 +25,9 @@ Fully uninstall EchoType from current user:
 - uninstall Homebrew cask `echotype` if installed
 - remove /Applications/EchoType.app
 - remove app data under ~/Library/Application Support/echotype
-- remove cache data under ~/Library/Caches/echotype
+  (including models under ~/Library/Application Support/echotype/models and metrics under ~/Library/Application Support/echotype/metrics)
+- remove legacy cache data under ~/Library/Caches/echotype
+  (including old Qwen downloads under ~/Library/Caches/echotype/qwen3-speech)
 - remove preferences plist
 - remove temporary echotype-* files under /tmp and /var/folders
 
@@ -104,7 +111,11 @@ if ! $ASSUME_YES; then
 This will fully uninstall ${APP_NAME} from this machine:
 - ${APP_PATH}
 - ${APP_SUPPORT_PATH}
+  - ${APP_WHISPER_MODELS_PATH}
+  - ${APP_QWEN_MODELS_PATH}
+  - ${APP_METRICS_PATH}
 - ${APP_CACHE_PATH}
+  - ${LEGACY_QWEN_CACHE_PATH}
 - ${PREFERENCES_PATH}
 - temporary EchoType files in /tmp and /var/folders
 EOF
@@ -115,6 +126,7 @@ EOF
   fi
 fi
 
+stop_process_if_running "EchoType.app/Contents/MacOS/EchoType"
 stop_process_if_running "EchoType.app/Contents/MacOS/echotype"
 stop_process_if_running "/Applications/EchoType.app"
 
