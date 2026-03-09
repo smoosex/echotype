@@ -224,8 +224,10 @@ final class RecordingOverlayWindowService {
     }
 
     private func overlayMetrics(for screen: NSScreen) -> (notchWidth: CGFloat, notchHeight: CGFloat, panelSize: NSSize) {
+        let hasNotch = screenHasNotch(screen)
         let notchWidth: CGFloat
-        if let leftInset = screen.auxiliaryTopLeftArea?.width,
+        if hasNotch,
+           let leftInset = screen.auxiliaryTopLeftArea?.width,
            let rightInset = screen.auxiliaryTopRightArea?.width
         {
             notchWidth = screen.frame.width - leftInset - rightInset + 12
@@ -233,12 +235,15 @@ final class RecordingOverlayWindowService {
             notchWidth = RecordingOverlayMetrics.fallbackNotchWidth
         }
 
-        let measuredHeight = screen.safeAreaInsets.top > 0
-            ? screen.safeAreaInsets.top
-            : screen.frame.maxY - screen.visibleFrame.maxY
-        let notchHeight = measuredHeight > 0
-            ? measuredHeight
-            : RecordingOverlayMetrics.fallbackNotchHeight
+        let notchHeight: CGFloat
+        if hasNotch {
+            let measuredHeight = screen.safeAreaInsets.top
+            notchHeight = measuredHeight > 0
+                ? measuredHeight
+                : RecordingOverlayMetrics.fallbackNotchHeight
+        } else {
+            notchHeight = 0
+        }
 
         let panelSize = NSSize(
             width: ceil(RecordingOverlayMetrics.finalWidth(notchWidth: notchWidth)),
@@ -273,6 +278,19 @@ final class RecordingOverlayWindowService {
             return false
         }
         return CGDisplayIsBuiltin(displayID) != 0
+    }
+
+    private func screenHasNotch(_ screen: NSScreen) -> Bool {
+        guard isBuiltInDisplay(screen),
+              let leftArea = screen.auxiliaryTopLeftArea,
+              let rightArea = screen.auxiliaryTopRightArea,
+              screen.safeAreaInsets.top > 0
+        else {
+            return false
+        }
+
+        let centerGap = screen.frame.width - leftArea.width - rightArea.width
+        return centerGap > 0 && centerGap < screen.frame.width
     }
 }
 

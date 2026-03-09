@@ -447,7 +447,8 @@ enum RecordingOverlayMetrics {
     static let fallbackNotchWidth: CGFloat = 172.5
     static let fallbackNotchHeight: CGFloat = 37
     static let horizontalExpansion: CGFloat = 12
-    static let minimumHeight: CGFloat = 70
+    static let minimumHeightWithNotch: CGFloat = 70
+    static let minimumHeightWithoutNotch: CGFloat = 40
     static let extraHeight: CGFloat = 33
     static let topCornerRadius: CGFloat = 6
     static let bottomCornerRadius: CGFloat = 18
@@ -461,7 +462,7 @@ enum RecordingOverlayMetrics {
     }
 
     static func resolvedNotchHeight(_ height: CGFloat) -> CGFloat {
-        height > 0 ? height : fallbackNotchHeight
+        height >= 0 ? height : fallbackNotchHeight
     }
 
     static func finalWidth(notchWidth: CGFloat) -> CGFloat {
@@ -469,7 +470,11 @@ enum RecordingOverlayMetrics {
     }
 
     static func finalHeight(notchHeight: CGFloat) -> CGFloat {
-        max(minimumHeight, notchHeight + extraHeight)
+        if notchHeight > 0 {
+            return max(minimumHeightWithNotch, notchHeight + extraHeight)
+        }
+
+        return minimumHeightWithoutNotch
     }
 
     static func easedProgress(_ progress: CGFloat) -> CGFloat {
