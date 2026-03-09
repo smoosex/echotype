@@ -6,6 +6,7 @@ enum AppLogger {
 
     static let app = Logger(subsystem: subsystem, category: "app")
     static let audio = Logger(subsystem: subsystem, category: "audio")
+    static let playback = Logger(subsystem: subsystem, category: "playback")
     static let stt = Logger(subsystem: subsystem, category: "stt")
     static let injection = Logger(subsystem: subsystem, category: "injection")
     static let permissions = Logger(subsystem: subsystem, category: "permissions")

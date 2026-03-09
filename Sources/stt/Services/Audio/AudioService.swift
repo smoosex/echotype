@@ -32,7 +32,7 @@ enum AudioServiceError: LocalizedError {
 }
 
 final class AudioService: @unchecked Sendable {
-    private let audioEngine = AVAudioEngine()
+    private var audioEngine: AVAudioEngine?
     private let stateLock = NSLock()
     private let levelLock = NSLock()
     private let writerQueue = DispatchQueue(label: "AudioService.writer")
@@ -65,6 +65,7 @@ final class AudioService: @unchecked Sendable {
             throw AudioServiceError.alreadyRecording
         }
 
+        let audioEngine = AVAudioEngine()
         let inputNode = audioEngine.inputNode
         let sourceFormat = inputNode.outputFormat(forBus: 0)
         let outputURL = makeOutputRecordingURL()
@@ -89,6 +90,7 @@ final class AudioService: @unchecked Sendable {
         outputRecordingURL = outputURL
         outputFormat = targetFormat
         self.converter = converter
+        self.audioEngine = audioEngine
 
         do {
             outputRecordingFile = try AVAudioFile(
@@ -121,7 +123,7 @@ final class AudioService: @unchecked Sendable {
             try audioEngine.start()
             isRecording = true
         } catch {
-            inputNode.removeTap(onBus: 0)
+            releaseAudioEngine()
             cleanupRecordingResources(removeOutputFile: true)
             resetLevelMeter()
             throw error
@@ -129,13 +131,15 @@ final class AudioService: @unchecked Sendable {
     }
 
     func stopRecording() async throws -> URL {
-        guard isRecording else {
+        guard isRecording, let audioEngine else {
             throw AudioServiceError.notRecording
         }
 
         let inputNode = audioEngine.inputNode
         inputNode.removeTap(onBus: 0)
         audioEngine.stop()
+        audioEngine.reset()
+        self.audioEngine = nil
         isRecording = false
         resetLevelMeter()
 
@@ -433,9 +437,18 @@ final class AudioService: @unchecked Sendable {
         outputRecordingFile = nil
         outputFormat = nil
         converter = nil
+        releaseAudioEngine()
 
         guard removeOutputFile, let outputURL else { return }
         try? FileManager.default.removeItem(at: outputURL)
+    }
+
+    private func releaseAudioEngine() {
+        guard let audioEngine else { return }
+        audioEngine.inputNode.removeTap(onBus: 0)
+        audioEngine.stop()
+        audioEngine.reset()
+        self.audioEngine = nil
     }
 }
 
