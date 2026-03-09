@@ -21,13 +21,6 @@ enum AppState: Equatable {
     }
 
     var symbolName: String {
-        switch self {
-        case .idle:
-            return "mic"
-        case .recording:
-            return "waveform"
-        case .processing:
-            return "hourglass"
-        }
+        "mic"
     }
 }

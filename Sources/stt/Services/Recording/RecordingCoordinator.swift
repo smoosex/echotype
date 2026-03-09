@@ -19,7 +19,6 @@ final class RecordingCoordinator {
 
     private let stateStore: AppStateStore
     private let audioService: AudioService
-    private let mediaPlaybackControlService: MediaPlaybackControlService
     private let wavValidationService: WAVValidationService
     private let textInjectionService: TextInjectionService
     private let recordingOverlayWindowService: RecordingOverlayWindowService
@@ -32,7 +31,6 @@ final class RecordingCoordinator {
     init(
         stateStore: AppStateStore,
         audioService: AudioService = AudioService(),
-        mediaPlaybackControlService: MediaPlaybackControlService = MediaPlaybackControlService(),
         wavValidationService: WAVValidationService = WAVValidationService(),
         textInjectionService: TextInjectionService = TextInjectionService(),
         recordingOverlayWindowService: RecordingOverlayWindowService = RecordingOverlayWindowService(),
@@ -40,7 +38,6 @@ final class RecordingCoordinator {
     ) {
         self.stateStore = stateStore
         self.audioService = audioService
-        self.mediaPlaybackControlService = mediaPlaybackControlService
         self.wavValidationService = wavValidationService
         self.textInjectionService = textInjectionService
         self.recordingOverlayWindowService = recordingOverlayWindowService
@@ -50,7 +47,6 @@ final class RecordingCoordinator {
 
     func startRecording(configuration: STTConfiguration) {
         do {
-            mediaPlaybackControlService.pauseActivePlayback()
             try audioService.startRecording()
             let sttService = shouldPrepareRecording(for: configuration)
                 ? STTService(configuration: configuration)
