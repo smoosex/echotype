@@ -33,8 +33,6 @@ struct EchoTypeMenuBarApp: App {
                 accessibilityPermission: model.accessibilityPermission,
                 hotkeyHint: model.hotkeyHint,
                 hotkeyGlyphHint: model.hotkeyGlyphHint,
-                hotkeyKeyCode: model.hotkeyKeyCode,
-                hotkeyModifiers: model.hotkeyModifiers,
                 hotkeyEnabled: model.hotkeyEnabled,
                 hotkeyError: model.hotkeyError,
                 hotkeyWarning: model.hotkeyWarning,

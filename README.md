@@ -13,6 +13,8 @@ It lets you start recording with a global hotkey, transcribes speech into text l
 - Two text injection modes: clipboard only, or clipboard plus auto-paste with automatic fallback
 - Settings page includes hotkey editing, permission guidance, model install/remove, and language hints
 
+Auto-paste note: when `Clipboard + Auto Paste` is enabled, EchoType pastes into whichever app is frontmost at transcription completion time. The transcribed text is also placed on the macOS clipboard before the paste shortcut is sent.
+
 ## System Requirements
 
 - macOS 14+

@@ -26,10 +26,6 @@ final class STTService {
         }
     }
 
-    func preload() async throws {
-        try await engine.preload()
-    }
-
     func beginRecordingPreparation() async throws {
         try await engine.beginRecordingPreparation()
     }
@@ -67,10 +63,6 @@ private struct WhisperKitEngine: STTEngine {
         try await WhisperKitRuntimeStore.shared.transcribe(audioURL: audioURL, configuration: configuration)
     }
 
-    func preload() async throws {
-        try await WhisperKitRuntimeStore.shared.preload(configuration: configuration)
-    }
-
     func beginRecordingPreparation() async throws {
         try await WhisperKitRuntimeStore.shared.beginRecordingPreparation(configuration: configuration)
     }
@@ -85,10 +77,6 @@ private struct SpeechSwiftQwenEngine: STTEngine {
 
     func transcribe(audioURL: URL) async throws -> String {
         try await Qwen3ASRRuntimeStore.shared.transcribe(audioURL: audioURL, configuration: configuration)
-    }
-
-    func preload() async throws {
-        try await Qwen3ASRRuntimeStore.shared.preload(configuration: configuration)
     }
 
     func beginRecordingPreparation() async throws {

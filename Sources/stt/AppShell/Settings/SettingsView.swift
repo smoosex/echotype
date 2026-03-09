@@ -11,8 +11,6 @@ struct SettingsView: View {
     let accessibilityPermission: PermissionState
     let hotkeyHint: String
     let hotkeyGlyphHint: String
-    let hotkeyKeyCode: UInt32
-    let hotkeyModifiers: UInt32
     let hotkeyEnabled: Bool
     let hotkeyError: String?
     let hotkeyWarning: String?
@@ -38,8 +36,6 @@ struct SettingsView: View {
         accessibilityPermission: PermissionState,
         hotkeyHint: String,
         hotkeyGlyphHint: String,
-        hotkeyKeyCode: UInt32,
-        hotkeyModifiers: UInt32,
         hotkeyEnabled: Bool,
         hotkeyError: String?,
         hotkeyWarning: String?,
@@ -59,8 +55,6 @@ struct SettingsView: View {
         self.accessibilityPermission = accessibilityPermission
         self.hotkeyHint = hotkeyHint
         self.hotkeyGlyphHint = hotkeyGlyphHint
-        self.hotkeyKeyCode = hotkeyKeyCode
-        self.hotkeyModifiers = hotkeyModifiers
         self.hotkeyEnabled = hotkeyEnabled
         self.hotkeyError = hotkeyError
         self.hotkeyWarning = hotkeyWarning

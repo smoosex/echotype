@@ -5,7 +5,6 @@ import Foundation
 
 protocol STTEngine: Sendable {
     func transcribe(audioURL: URL) async throws -> String
-    func preload() async throws
     func beginRecordingPreparation() async throws
     func endRecordingPreparation() async
 }
@@ -58,24 +57,8 @@ actor WhisperKitRuntimeStore {
     private var idleGeneration: UInt64 = 0
     private var idleUnloadTask: Task<Void, Never>?
 
-    func preload(configuration: STTConfiguration) async throws {
-        guard configuration.isModelInstalled,
-              let folder = configuration.whisperModelFolder
-        else {
-            return
-        }
-        try await withActiveUse(modelTitle: configuration.selectedModel.title) {
-            let preloadStart = Date()
-            _ = try await resolveWhisperKit(for: configuration.selectedModel, folder: folder)
-            let preloadSeconds = Self.formattedSeconds(Date().timeIntervalSince(preloadStart))
-            AppLogger.stt.info("WhisperKit preload ready for \(configuration.selectedModel.title, privacy: .public) in \(preloadSeconds, privacy: .public)s")
-        }
-    }
-
     func beginRecordingPreparation(configuration: STTConfiguration) async throws {
-        guard configuration.isModelInstalled,
-              let folder = configuration.whisperModelFolder
-        else {
+        guard let folder = configuration.whisperModelFolder else {
             return
         }
 
@@ -92,14 +75,11 @@ actor WhisperKitRuntimeStore {
     }
 
     func endRecordingPreparation(configuration: STTConfiguration) {
-        guard configuration.isModelInstalled else { return }
+        guard configuration.whisperModelFolder != nil else { return }
         endActiveUse(modelTitle: configuration.selectedModel.title)
     }
 
     func transcribe(audioURL: URL, configuration: STTConfiguration) async throws -> String {
-        guard configuration.isModelInstalled else {
-            throw STTEngineError.modelNotInstalled(configuration.selectedModel.title)
-        }
         guard let folder = configuration.whisperModelFolder else {
             throw STTEngineError.modelNotInstalled(configuration.selectedModel.title)
         }
@@ -329,13 +309,6 @@ actor Qwen3ASRRuntimeStore {
     private var activeUseCount = 0
     private var idleGeneration: UInt64 = 0
     private var idleUnloadTask: Task<Void, Never>?
-
-    func preload(configuration: STTConfiguration) async throws {
-        guard configuration.isModelInstalled else { return }
-        try await withActiveUse(modelTitle: configuration.selectedModel.title) {
-            _ = try await resolveQwenModel(for: configuration.selectedModel)
-        }
-    }
 
     func beginRecordingPreparation(configuration: STTConfiguration) async throws {
         guard configuration.isModelInstalled else { return }

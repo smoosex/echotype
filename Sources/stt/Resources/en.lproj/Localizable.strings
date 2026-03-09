@@ -80,27 +80,13 @@
 "injection.mode.clipboard_paste" = "Clipboard + Auto Paste";
 "error.clipboard_failed" = "Failed to write to clipboard.";
 "error.paste_failed" = "Failed to auto-paste.";
+"error.managed_model_directory_required_format" = "%@ must stay inside EchoType's managed model directory.";
 
 "whisper_transcription.auto" = "Auto";
 "whisper_transcription.chinese" = "Chinese";
 "whisper_transcription.english" = "English";
 
-"app.injection.idle" = "Idle";
-"app.performance.no_samples" = "No performance samples yet";
-"app.metrics.na" = "N/A";
-"app.selftest.not_run" = "Self-test not run";
 "app.hotkey.disabled_format" = "Disabled (%@)";
-"app.transcription.processing" = "Processing transcription...";
-"app.transcription.success" = "Last transcription succeeded";
-"app.transcription.error_format" = "EchoType error: %@";
-"app.injection.pasted" = "Injection: paste shortcut sent";
-"app.injection.copied" = "Injected: copied";
-"app.injection.fallback_copied" = "Injection: auto-paste unavailable, copied";
-"app.injection.skipped" = "Injection skipped";
-"app.performance.summary_with_p50_format" = "runs=%d success=%.0f%% p50=%.2fs p95=%@ (%@)";
-"app.performance.summary_basic_format" = "runs=%d success=%.0f%% (%@)";
-"app.performance.readiness_ready" = "ready";
-"app.performance.readiness_collecting" = "collecting";
 
 "stt.ready" = "Ready";
 "stt.selected_model_not_installed_format" = "%@ is not installed yet.";

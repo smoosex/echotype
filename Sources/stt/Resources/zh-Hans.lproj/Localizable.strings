@@ -80,27 +80,13 @@
 "injection.mode.clipboard_paste" = "复制后自动粘贴";
 "error.clipboard_failed" = "写入剪贴板失败。";
 "error.paste_failed" = "自动粘贴失败。";
+"error.managed_model_directory_required_format" = "%@ 必须保留在 EchoType 管理的模型目录中。";
 
 "whisper_transcription.auto" = "自动";
 "whisper_transcription.chinese" = "中文";
 "whisper_transcription.english" = "英文";
 
-"app.injection.idle" = "空闲";
-"app.performance.no_samples" = "暂无性能采样";
-"app.metrics.na" = "无";
-"app.selftest.not_run" = "尚未运行自测";
 "app.hotkey.disabled_format" = "已禁用（%@）";
-"app.transcription.processing" = "正在转写...";
-"app.transcription.success" = "最近一次转写成功";
-"app.transcription.error_format" = "EchoType 错误：%@";
-"app.injection.pasted" = "已发送粘贴快捷键";
-"app.injection.copied" = "已注入：复制到剪贴板";
-"app.injection.fallback_copied" = "自动粘贴不可用，已复制到剪贴板";
-"app.injection.skipped" = "已跳过注入";
-"app.performance.summary_with_p50_format" = "样本=%d 成功率=%.0f%% p50=%.2fs p95=%@（%@）";
-"app.performance.summary_basic_format" = "样本=%d 成功率=%.0f%%（%@）";
-"app.performance.readiness_ready" = "就绪";
-"app.performance.readiness_collecting" = "采集中";
 
 "stt.ready" = "就绪";
 "stt.selected_model_not_installed_format" = "%@ 尚未安装。";

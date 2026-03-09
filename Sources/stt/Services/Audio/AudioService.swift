@@ -174,13 +174,15 @@ final class AudioService: @unchecked Sendable {
         }
 
         do {
-            try convertAndWrite(
+            let didWriteAudio = try convertAndWrite(
                 inputBuffer: buffer,
                 converter: converter,
                 outputFile: outputRecordingFile,
                 outputFormat: outputFormat
             )
-            markCapturedAudio()
+            if didWriteAudio {
+                markCapturedAudio()
+            }
         } catch {
             setWriterErrorIfNeeded(.conversionFailed(error.localizedDescription))
         }
@@ -210,9 +212,10 @@ final class AudioService: @unchecked Sendable {
         converter: AVAudioConverter,
         outputFile: AVAudioFile,
         outputFormat: AVAudioFormat
-    ) throws {
+    ) throws -> Bool {
         converter.reset()
         let inputProvider = InputProvider(buffer: inputBuffer)
+        var didWriteAudio = false
 
         let ratio = outputFormat.sampleRate / inputBuffer.format.sampleRate
         let estimatedFrames = max(AVAudioFrameCount(Double(inputBuffer.frameLength) * ratio) + 32, 512)
@@ -231,17 +234,18 @@ final class AudioService: @unchecked Sendable {
 
             if outputBuffer.frameLength > 0 {
                 try outputFile.write(from: outputBuffer)
+                didWriteAudio = true
             }
 
             switch status {
             case .haveData:
                 continue
             case .inputRanDry, .endOfStream:
-                return
+                return didWriteAudio
             case .error:
                 throw AudioServiceError.conversionFailed("Converter returned error status.")
             @unknown default:
-                return
+                return didWriteAudio
             }
         }
     }

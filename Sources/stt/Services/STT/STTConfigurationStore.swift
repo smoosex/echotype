@@ -26,6 +26,17 @@ struct ModelInstallRowState: Equatable {
     }
 }
 
+enum STTConfigurationStoreError: LocalizedError {
+    case unmanagedModelDirectory(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unmanagedModelDirectory(let modelName):
+            return L10n.text(L10nKey.errorManagedModelDirectoryRequiredFormat, modelName)
+        }
+    }
+}
+
 @MainActor
 final class STTConfigurationStore: ObservableObject {
     @Published var selectedModelID: String {
@@ -148,6 +159,7 @@ final class STTConfigurationStore: ObservableObject {
             legacyDomain: legacyDomain,
             fileManager: fileManager
         )
+        whisperModelFolders = sanitizeWhisperModelFolders(whisperModelFolders)
 
         persist()
         advanceReadinessRevision()
@@ -195,9 +207,7 @@ final class STTConfigurationStore: ObservableObject {
     func isModelInstalled(_ model: STTModelOption) -> Bool {
         switch model.family {
         case .whisperKit:
-            guard let storedPath = whisperModelFolders[model.id] else { return false }
-            var isDirectory: ObjCBool = false
-            return fileManager.fileExists(atPath: storedPath, isDirectory: &isDirectory) && isDirectory.boolValue
+            return installedLocation(for: model) != nil
         case .qwen3ASR:
             guard let modelID = model.qwenModelID,
                   let cacheDirectory = try? HuggingFaceDownloader.getCacheDirectory(for: modelID)
@@ -296,10 +306,8 @@ final class STTConfigurationStore: ObservableObject {
         do {
             switch model.family {
             case .whisperKit:
-                guard let folder = whisperModelFolders[model.id] else {
-                    throw STTEngineError.modelNotInstalled(model.title)
-                }
-                try await removeItemInBackground(at: URL(fileURLWithPath: folder, isDirectory: true))
+                let folderURL = try validatedManagedWhisperModelDirectoryURL(for: model)
+                try await removeItemInBackground(at: folderURL)
                 whisperModelFolders.removeValue(forKey: model.id)
                 await WhisperKitRuntimeStore.shared.invalidate(model: model)
             case .qwen3ASR:
@@ -343,7 +351,10 @@ final class STTConfigurationStore: ObservableObject {
             downloadBase: downloadBase,
             progressCallback: Self.makeWhisperProgressCallback(progressBridge)
         )
-        whisperModelFolders[model.id] = modelFolder.path
+        whisperModelFolders[model.id] = try canonicalManagedWhisperModelDirectoryPath(
+            for: modelFolder,
+            modelName: model.title
+        )
     }
 
     private func installQwenModel(_ model: STTModelOption) async throws {
@@ -555,15 +566,11 @@ final class STTConfigurationStore: ObservableObject {
     private func installedLocation(for model: STTModelOption) -> URL? {
         switch model.family {
         case .whisperKit:
-            guard let folder = whisperModelFolders[model.id] else { return nil }
-            let url = URL(fileURLWithPath: folder, isDirectory: true)
-            var isDirectory: ObjCBool = false
-            guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory),
-                  isDirectory.boolValue
-            else {
-                return nil
-            }
-            return url
+            guard let storedPath = whisperModelFolders[model.id] else { return nil }
+            return try? validatedExistingWhisperModelDirectoryURL(
+                forStoredPath: storedPath,
+                modelName: model.title
+            )
         case .qwen3ASR:
             guard let modelID = model.qwenModelID,
                   let cacheDirectory = try? HuggingFaceDownloader.getCacheDirectory(for: modelID),
@@ -585,6 +592,91 @@ final class STTConfigurationStore: ObservableObject {
         readinessRevision &+= 1
     }
 
+    private func sanitizeWhisperModelFolders(_ folders: [String: String]) -> [String: String] {
+        folders.compactMapValues { storedPath in
+            try? canonicalExistingWhisperModelDirectoryPath(
+                for: URL(fileURLWithPath: storedPath, isDirectory: true),
+                modelName: storedPath
+            )
+        }
+    }
+
+    private func validatedManagedWhisperModelDirectoryURL(for model: STTModelOption) throws -> URL {
+        guard let storedPath = whisperModelFolders[model.id] else {
+            throw STTEngineError.modelNotInstalled(model.title)
+        }
+
+        return try validatedManagedWhisperModelDirectoryURL(
+            forStoredPath: storedPath,
+            modelName: model.title,
+            requireExisting: true
+        )
+    }
+
+    private func validatedManagedWhisperModelDirectoryURL(
+        forStoredPath storedPath: String,
+        modelName: String,
+        requireExisting: Bool
+    ) throws -> URL {
+        let canonicalPath = try canonicalManagedWhisperModelDirectoryPath(
+            for: URL(fileURLWithPath: storedPath, isDirectory: true),
+            modelName: modelName,
+            requireExisting: requireExisting
+        )
+        return URL(fileURLWithPath: canonicalPath, isDirectory: true)
+    }
+
+    private func validatedExistingWhisperModelDirectoryURL(
+        forStoredPath storedPath: String,
+        modelName: String
+    ) throws -> URL {
+        let canonicalPath = try canonicalExistingWhisperModelDirectoryPath(
+            for: URL(fileURLWithPath: storedPath, isDirectory: true),
+            modelName: modelName
+        )
+        return URL(fileURLWithPath: canonicalPath, isDirectory: true)
+    }
+
+    private func canonicalExistingWhisperModelDirectoryPath(
+        for url: URL,
+        modelName: String
+    ) throws -> String {
+        let candidate = url.standardizedFileURL.resolvingSymlinksInPath()
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else {
+            throw STTEngineError.modelNotInstalled(modelName)
+        }
+        return candidate.path
+    }
+
+    private func canonicalManagedWhisperModelDirectoryPath(
+        for url: URL,
+        modelName: String,
+        requireExisting: Bool = false
+    ) throws -> String {
+        let managedRoot = try STTPathResolver.whisperDownloadBase(fileManager: fileManager)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let candidate = url.standardizedFileURL.resolvingSymlinksInPath()
+
+        guard candidate.isDescendant(of: managedRoot) else {
+            throw STTConfigurationStoreError.unmanagedModelDirectory(modelName)
+        }
+
+        if requireExisting {
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue
+            else {
+                throw STTEngineError.modelNotInstalled(modelName)
+            }
+        }
+
+        return candidate.path
+    }
+
     private func removeItemInBackground(at url: URL) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             DispatchQueue.global(qos: .utility).async {
@@ -596,5 +688,16 @@ final class STTConfigurationStore: ObservableObject {
                 }
             }
         }
+    }
+}
+
+private extension URL {
+    func isDescendant(of parent: URL) -> Bool {
+        let parentComponents = parent.pathComponents
+        let candidateComponents = pathComponents
+        guard candidateComponents.count > parentComponents.count else {
+            return false
+        }
+        return Array(candidateComponents.prefix(parentComponents.count)) == parentComponents
     }
 }

@@ -22,11 +22,14 @@ struct WAVValidationSummary: Equatable {
 
 enum WAVValidationError: LocalizedError {
     case formatMismatch(expected: String, actual: String)
+    case noAudioFrames
 
     var errorDescription: String? {
         switch self {
         case .formatMismatch(let expected, let actual):
             return "WAV format mismatch. expected=\(expected), actual=\(actual)"
+        case .noAudioFrames:
+            return "WAV file contains no audio frames."
         }
     }
 }
@@ -35,6 +38,10 @@ final class WAVValidationService {
     func validate(at url: URL) throws -> WAVValidationSummary {
         let file = try AVAudioFile(forReading: url)
         let format = file.processingFormat
+
+        guard file.length > 0 else {
+            throw WAVValidationError.noAudioFrames
+        }
 
         let duration = Double(file.length) / format.sampleRate
         let summary = WAVValidationSummary(

@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -9,80 +9,37 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var hotkeyHint = HotkeyShortcut.defaultShortcut.hint
     @Published private(set) var hotkeyGlyphHint = HotkeyShortcut.defaultShortcut.glyphHint
-    @Published private(set) var hotkeyKeyCode = HotkeyShortcut.defaultShortcut.keyCode
-    @Published private(set) var hotkeyModifiers = HotkeyShortcut.defaultShortcut.normalizedModifiers
     @Published private(set) var hotkeyEnabled = true
     @Published private(set) var hotkeyError: String?
     @Published private(set) var hotkeyWarning: String?
     @Published private(set) var currentLanguage: AppLanguage
-    @Published private(set) var lastRecordingFile: String?
-    @Published private(set) var lastAudioValidation: String?
-    @Published private(set) var lastTranscription: String?
-    @Published private(set) var transcriptionHint: String
-    @Published private(set) var injectionStatus: String
     @Published private(set) var microphonePermission: PermissionState = .notDetermined
     @Published private(set) var accessibilityPermission: PermissionState = .denied
     @Published private(set) var onboardingCompleted: Bool
-    @Published private(set) var performanceSummary: String
-    @Published private(set) var metricsDirectoryPath: String
-    @Published private(set) var selfTestSummary: String
-    @Published private(set) var recordingLevel: Double = 0
 
     private let hotkeyService = HotkeyService()
-    private let audioService = AudioService()
-    private let wavValidationService = WAVValidationService()
-    private let textInjectionService = TextInjectionService()
     private let permissionService = PermissionService()
     private let onboardingWindowService = OnboardingWindowService()
-    private let recordingOverlayWindowService = RecordingOverlayWindowService()
-    private let processMetricsSampler = ProcessMetricsSampler()
-    private let performanceReportService = PerformanceReportService()
-    private let stabilitySelfTestService = StabilitySelfTestService()
     private let onboardingDefaultsKey = "onboarding.completed"
-    private let minimumPerformanceSamples = 20
-    private let overlayResultHoldDuration: Duration = .milliseconds(720)
-    private struct RecordingPreparation {
-        let id: UUID
-        let configuration: STTConfiguration
-        let task: Task<Bool, Never>
-    }
+    private let recordingCoordinator: RecordingCoordinator
 
     private var lastKnownShortcut = HotkeyShortcut.defaultShortcut
     private var onboardingDontShowAgainSelection = false
     private var openSettingsWindowHandler: (() -> Void)?
     private var onboardingAutoPresentationTask: DispatchWorkItem?
-    private var pipelineFeedback: PipelineFeedback = .readiness
-    private var performanceBaselineReport: PerformanceBaselineReport?
-    private var recordingPreparation: RecordingPreparation?
-    private var activeRecordingPreparationID: UUID?
-    private var isPreparingModel = false
-    private var recordingPreparationReady = false
-    private var overlaySessionID = UUID()
-    private var selfTestExecuted = false
     private var cancellables = Set<AnyCancellable>()
 
     init() {
+        recordingCoordinator = RecordingCoordinator(stateStore: stateStore)
+
         let initialLanguage = preferencesStore.appLanguage
         currentLanguage = initialLanguage
-        transcriptionHint = ""
-        injectionStatus = L10n.text(L10nKey.appInjectionIdle, language: initialLanguage)
-        performanceSummary = L10n.text(L10nKey.appPerformanceNoSamples, language: initialLanguage)
-        metricsDirectoryPath = L10n.text(L10nKey.appMetricsNA, language: initialLanguage)
-        selfTestSummary = L10n.text(L10nKey.appSelfTestNotRun, language: initialLanguage)
         onboardingCompleted = UserDefaults.standard.bool(forKey: onboardingDefaultsKey)
         onboardingDontShowAgainSelection = onboardingCompleted
-        metricsDirectoryPath = performanceReportService.metricsDirectoryPath()
         bindLanguageChanges()
-        bindSTTConfigurationChanges()
-        bindRecordingLevelChanges()
         refreshPermissionStates()
-        applyPipelineFeedback(.readiness)
-        refreshPerformanceSummary()
         configureHotkey()
         scheduleOnboardingPresentationIfNeeded()
-        Task { [weak self] in
-            await self?.loadPersistedPerformanceReport()
-        }
     }
 
     private func bindLanguageChanges() {
@@ -91,35 +48,8 @@ final class AppModel: ObservableObject {
             .sink { [weak self] language in
                 guard let self else { return }
                 currentLanguage = language
-                applyPipelineFeedback(pipelineFeedback)
-                if !selfTestExecuted {
-                    selfTestSummary = L10n.text(L10nKey.appSelfTestNotRun, language: language)
-                }
-                refreshPerformanceSummary()
                 applyHotkeyPresentation(shortcut: lastKnownShortcut, enabled: hotkeyEnabled)
                 refreshOnboardingWindowIfNeeded()
-            }
-            .store(in: &cancellables)
-    }
-
-    private func bindSTTConfigurationChanges() {
-        sttConfigurationStore.$readinessRevision
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard let self else { return }
-                guard case .readiness = pipelineFeedback else { return }
-                applyPipelineFeedback(.readiness)
-            }
-            .store(in: &cancellables)
-    }
-
-    private func bindRecordingLevelChanges() {
-        audioService.recordingLevelPublisher
-            .removeDuplicates(by: { abs($0 - $1) < 0.01 })
-            .sink { [weak self] level in
-                guard let self else { return }
-                recordingLevel = level
-                recordingOverlayWindowService.updateLevel(level)
             }
             .store(in: &cancellables)
     }
@@ -128,9 +58,9 @@ final class AppModel: ObservableObject {
         refreshPermissionStates()
         switch stateStore.state {
         case .idle:
-            startRecordingFlow()
+            recordingCoordinator.startRecording(configuration: sttConfigurationStore.makeConfiguration())
         case .recording:
-            stopRecordingFlow()
+            recordingCoordinator.stopRecording(injectionMode: preferencesStore.injectionMode)
         case .processing:
             break
         }
@@ -208,20 +138,6 @@ final class AppModel: ObservableObject {
 
     func setOpenSettingsWindowHandler(_ handler: @escaping () -> Void) {
         openSettingsWindowHandler = handler
-    }
-
-    func runStabilitySelfTest(iterations: Int = 200) {
-        Task { [weak self] in
-            guard let self else { return }
-            let result = await stabilitySelfTestService.run(
-                iterations: iterations,
-                stateStore: stateStore,
-                textInjectionService: textInjectionService
-            )
-            selfTestExecuted = true
-            selfTestSummary = result.summary
-            AppLogger.app.info("Stability self-test completed: \(result.summary)")
-        }
     }
 
     func setHotkeyEnabled(_ enabled: Bool) -> String? {
@@ -387,8 +303,6 @@ final class AppModel: ObservableObject {
     private func applyHotkeyPresentation(shortcut: HotkeyShortcut, enabled: Bool) {
         hotkeyHint = formatHotkeyHint(shortcut: shortcut, enabled: enabled)
         hotkeyGlyphHint = shortcut.glyphHint
-        hotkeyKeyCode = shortcut.keyCode
-        hotkeyModifiers = shortcut.normalizedModifiers
     }
 
     private func formatHotkeyHint(shortcut: HotkeyShortcut, enabled: Bool) -> String {
@@ -397,24 +311,6 @@ final class AppModel: ObservableObject {
             return base
         }
         return L10n.text(L10nKey.appHotkeyDisabledFormat, language: currentLanguage, base)
-    }
-
-    private func startRecordingFlow() {
-        do {
-            try audioService.startRecording()
-            stateStore.startRecording()
-            lastTranscription = nil
-            lastAudioValidation = nil
-            showRecordingOverlay()
-            startRecordingPreparation()
-            applyPipelineFeedback(.readiness)
-            AppLogger.audio.info("Recording started")
-        } catch {
-            hideRecordingOverlay()
-            stateStore.reset()
-            applyPipelineFeedback(.failure(error.localizedDescription))
-            AppLogger.audio.error("Recording start failed: \(error.localizedDescription)")
-        }
     }
 
     private func refreshPermissionStates() {
@@ -469,314 +365,6 @@ final class AppModel: ObservableObject {
             completeOnboarding()
         } else {
             resetOnboarding()
-        }
-    }
-
-    private func stopRecordingFlow() {
-        lastTranscription = nil
-        stateStore.startProcessing()
-        applyPipelineFeedback(.processing)
-        recordingOverlayWindowService.setPreparationAccessoryVisible(false)
-        recordingOverlayWindowService.updateMode(isPreparingModel ? .loading : .transcribing)
-
-        Task { [weak self] in
-            await self?.finalizeRecordingFlow()
-        }
-    }
-
-    private func startRecordingPreparation() {
-        recordingPreparation?.task.cancel()
-        isPreparingModel = false
-        recordingPreparationReady = false
-        activeRecordingPreparationID = nil
-        recordingOverlayWindowService.setPreparationAccessoryVisible(false)
-
-        let configuration = sttConfigurationStore.makeConfiguration()
-        guard configuration.isModelInstalled else {
-            recordingPreparation = nil
-            return
-        }
-
-        isPreparingModel = true
-        recordingOverlayWindowService.setPreparationAccessoryVisible(true)
-        let task = Task(priority: .utility) {
-            do {
-                let sttService = STTService(configuration: configuration)
-                try await sttService.beginRecordingPreparation()
-                return true
-            } catch is CancellationError {
-                AppLogger.stt.info("Recording preparation cancelled: \(configuration.selectedModel.title, privacy: .public)")
-                return false
-            } catch {
-                AppLogger.stt.error("Recording preparation failed: \(error.localizedDescription)")
-                return false
-            }
-        }
-
-        let preparation = RecordingPreparation(
-            id: UUID(),
-            configuration: configuration,
-            task: task
-        )
-        recordingPreparation = preparation
-        activeRecordingPreparationID = preparation.id
-
-        Task { [weak self] in
-            guard let self else { return }
-            let didAcquirePreparation = await task.value
-            self.handleRecordingPreparationCompletion(
-                id: preparation.id,
-                didAcquirePreparation: didAcquirePreparation
-            )
-        }
-    }
-
-    private func finishRecordingPreparation(
-        _ preparation: RecordingPreparation?,
-        didAcquirePreparation: Bool
-    ) async {
-        guard let preparation else { return }
-        guard didAcquirePreparation else { return }
-
-        let sttService = STTService(configuration: preparation.configuration)
-        await sttService.endRecordingPreparation()
-    }
-
-    private func showRecordingOverlay() {
-        overlaySessionID = UUID()
-        recordingOverlayWindowService.show(mode: .recording)
-        recordingOverlayWindowService.updateLevel(recordingLevel)
-    }
-
-    private func hideRecordingOverlay() {
-        overlaySessionID = UUID()
-        recordingOverlayWindowService.hide()
-        recordingLevel = 0
-    }
-
-    private func runTranscription(
-        audioURL: URL,
-        audioDurationSeconds: Double,
-        pipelineStart: Date
-    ) async {
-        defer {
-            try? FileManager.default.removeItem(at: audioURL)
-        }
-
-        var success = false
-        var sttDurationSeconds: Double?
-        var injectionResultValue = "skipped"
-        var pipelineError: String?
-
-        do {
-            let configuration = sttConfigurationStore.makeConfiguration()
-            let sttService = STTService(configuration: configuration)
-            let sttStart = Date()
-            let text = try await sttService.transcribe(audioURL: audioURL)
-            sttDurationSeconds = Date().timeIntervalSince(sttStart)
-            AppLogger.stt.info("Transcription succeeded")
-            let injectionResult = try textInjectionService.inject(
-                text: text,
-                mode: preferencesStore.injectionMode
-            )
-            injectionResultValue = injectionResult.persistenceValue
-            AppLogger.injection.info("Injection result: \(injectionResult.persistenceValue)")
-            applyPipelineFeedback(.success(transcription: text, injectionResult: injectionResult))
-            success = true
-            stateStore.reset()
-        } catch {
-            AppLogger.stt.error("Transcription failed: \(error.localizedDescription)")
-            pipelineError = error.localizedDescription
-            applyPipelineFeedback(.failure(error.localizedDescription))
-            stateStore.reset()
-        }
-
-        let endToEndSeconds = Date().timeIntervalSince(pipelineStart)
-        let processMetrics = processMetricsSampler.stop()
-        recordingOverlayWindowService.updateMode(success ? .success : .failure)
-        let overlaySessionID = self.overlaySessionID
-        let run = TranscriptionRunRecord(
-            id: UUID().uuidString,
-            finishedAtISO8601: ISO8601DateFormatter().string(from: Date()),
-            audioFileName: audioURL.lastPathComponent,
-            audioDurationSeconds: audioDurationSeconds,
-            sttDurationSeconds: sttDurationSeconds,
-            endToEndDurationSeconds: endToEndSeconds,
-            injectionMode: preferencesStore.injectionMode.rawValue,
-            injectionResult: injectionResultValue,
-            success: success,
-            errorMessage: pipelineError,
-            processMetrics: processMetrics
-        )
-        let report = await performanceReportService.appendRunAndRefresh(
-            run,
-            minSamples: minimumPerformanceSamples
-        )
-        performanceBaselineReport = report
-        refreshPerformanceSummary()
-        await hideRecordingOverlayAfterResult(for: overlaySessionID)
-    }
-
-    private func localizedTranscriptionHint(for feedback: PipelineFeedback) -> String {
-        switch feedback {
-        case .readiness:
-            return sttConfigurationStore.readinessText
-        case .processing:
-            return L10n.text(L10nKey.appTranscriptionProcessing, language: currentLanguage)
-        case .success:
-            return L10n.text(L10nKey.appTranscriptionSuccess, language: currentLanguage)
-        case let .failure(message):
-            return L10n.text(L10nKey.appTranscriptionErrorFormat, language: currentLanguage, message)
-        }
-    }
-
-    private func localizedInjectionStatus(for feedback: PipelineFeedback) -> String {
-        switch feedback {
-        case .readiness, .processing:
-            return L10n.text(L10nKey.appInjectionIdle, language: currentLanguage)
-        case let .success(_, injectionResult):
-            switch injectionResult {
-            case .clipboardOnly:
-                return L10n.text(L10nKey.appInjectionCopied, language: currentLanguage)
-            case .pasteShortcutSent:
-                return L10n.text(L10nKey.appInjectionPasted, language: currentLanguage)
-            case .fallbackToClipboard:
-                return L10n.text(L10nKey.appInjectionFallbackCopied, language: currentLanguage)
-            }
-        case .failure:
-            return L10n.text(L10nKey.appInjectionSkipped, language: currentLanguage)
-        }
-    }
-
-    private func applyPipelineFeedback(_ feedback: PipelineFeedback) {
-        pipelineFeedback = feedback
-
-        switch feedback {
-        case .success(let transcription, _):
-            lastTranscription = transcription
-        case .processing, .readiness, .failure:
-            if case .failure = feedback {
-                lastTranscription = nil
-            }
-        }
-
-        transcriptionHint = localizedTranscriptionHint(for: feedback)
-        injectionStatus = localizedInjectionStatus(for: feedback)
-    }
-
-    private func finalizeRecordingFlow() async {
-        let preparation = recordingPreparation
-        recordingPreparation = nil
-        var didAcquirePreparation = recordingPreparationReady
-
-        do {
-            let outputURL = try await audioService.stopRecording()
-            lastRecordingFile = outputURL.lastPathComponent
-            AppLogger.audio.info("Recording stopped; output: \(outputURL.lastPathComponent)")
-
-            let summary = try wavValidationService.validate(at: outputURL)
-            lastAudioValidation = summary.brief
-            AppLogger.audio.info("WAV validated: \(summary.brief)")
-
-            if isPreparingModel {
-                didAcquirePreparation = await awaitRecordingPreparation(preparation)
-            }
-
-            recordingOverlayWindowService.updateMode(.transcribing)
-            processMetricsSampler.start()
-            let pipelineStart = Date()
-            await runTranscription(
-                audioURL: outputURL,
-                audioDurationSeconds: summary.durationSeconds,
-                pipelineStart: pipelineStart
-            )
-        } catch {
-            stateStore.reset()
-            applyPipelineFeedback(.failure(error.localizedDescription))
-            AppLogger.audio.error("Recording pipeline failed: \(error.localizedDescription)")
-            recordingOverlayWindowService.updateMode(.failure)
-            await hideRecordingOverlayAfterResult(for: overlaySessionID)
-        }
-
-        await finishRecordingPreparation(
-            preparation,
-            didAcquirePreparation: didAcquirePreparation
-        )
-        completeRecordingPreparationCycle(id: preparation?.id)
-    }
-
-    private func handleRecordingPreparationCompletion(
-        id: UUID,
-        didAcquirePreparation: Bool
-    ) {
-        guard activeRecordingPreparationID == id else { return }
-        isPreparingModel = false
-        recordingPreparationReady = didAcquirePreparation
-        recordingOverlayWindowService.setPreparationAccessoryVisible(false)
-    }
-
-    private func awaitRecordingPreparation(
-        _ preparation: RecordingPreparation?
-    ) async -> Bool {
-        guard let preparation else { return false }
-        let didAcquirePreparation = await preparation.task.value
-        handleRecordingPreparationCompletion(
-            id: preparation.id,
-            didAcquirePreparation: didAcquirePreparation
-        )
-        return didAcquirePreparation
-    }
-
-    private func completeRecordingPreparationCycle(id: UUID?) {
-        guard activeRecordingPreparationID == id else { return }
-        activeRecordingPreparationID = nil
-        isPreparingModel = false
-        recordingPreparationReady = false
-        recordingOverlayWindowService.setPreparationAccessoryVisible(false)
-    }
-
-    private func hideRecordingOverlayAfterResult(for sessionID: UUID) async {
-        try? await Task.sleep(for: overlayResultHoldDuration)
-        guard overlaySessionID == sessionID else { return }
-        hideRecordingOverlay()
-    }
-
-    private func loadPersistedPerformanceReport() async {
-        let report = await performanceReportService.loadOrGenerateBaselineReport(minSamples: minimumPerformanceSamples)
-        performanceBaselineReport = report
-        refreshPerformanceSummary()
-    }
-
-    private func refreshPerformanceSummary() {
-        guard let report = performanceBaselineReport else {
-            performanceSummary = L10n.text(L10nKey.appPerformanceNoSamples, language: currentLanguage)
-            return
-        }
-
-        let readiness = report.readiness == "ready"
-            ? L10n.text(L10nKey.appPerformanceReadinessReady, language: currentLanguage)
-            : L10n.text(L10nKey.appPerformanceReadinessCollecting, language: currentLanguage)
-
-        if let p50 = report.p50EndToEndSeconds {
-            let p95Text = report.p95EndToEndSeconds.map { String(format: "%.2fs", $0) }
-                ?? L10n.text(L10nKey.appMetricsNA, language: currentLanguage)
-            performanceSummary = L10n.text(
-                L10nKey.appPerformanceSummaryWithP50Format,
-                language: currentLanguage,
-                report.sampleCount,
-                report.successRate * 100,
-                p50,
-                p95Text,
-                readiness
-            )
-        } else {
-            performanceSummary = L10n.text(
-                L10nKey.appPerformanceSummaryBasicFormat,
-                language: currentLanguage,
-                report.sampleCount,
-                report.successRate * 100,
-                readiness
-            )
         }
     }
 }
