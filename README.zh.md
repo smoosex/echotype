@@ -89,43 +89,6 @@ swift run
 说明：`speech-swift` 依赖 `mlx.metallib`。首次本地开发构建后，请运行一次 `scripts/build_mlx_metallib.sh debug`。
 如当前系统只启用了 Command Line Tools，可先安装完整 Xcode，再运行 `xcodebuild -downloadComponent MetalToolchain`。
 
-## 发布打包（维护者）
-
-手动打包：
-
-```bash
-scripts/package.sh \
-  --version 1.0.0 \
-  --app-name EchoType \
-  --binary-name echotype \
-  --bundle-id com.smoose.echotype
-```
-
-本地上传到 GitHub Release（推荐，避免云端构建环境差异）：
-
-```bash
-scripts/release.sh \
-  --version 1.0.0 \
-  --repo smoosex/echotype \
-  --tap-repo smoosex/homebrew-tap
-```
-
-说明：
-
-- 该脚本会读取本地 `dist/` 产物并上传到对应 tag 的 GitHub Release。
-- 会基于本地 dmg 自动生成 `dist/echotype.rb` 并上传。
-- `--tap-repo` 可选；不传则只上传 Release 资产，不同步 Homebrew tap。
-- 若传 `--tap-repo`，脚本会通过 SSH (`git@github.com:<owner>/<repo>.git`) 同步，请先配置 GitHub SSH key。
-
-## 维护者测试环境
-
-当前发布流程以维护者本机环境打包验证为准。已验证环境：
-
-- macOS Tahoe 26.3
-- Apple Silicon（arm64）
-- Xcode 26.3 + Metal Toolchain
-- Homebrew（用于安装/验证 cask）
-
 ## 完整卸载
 
 ```bash

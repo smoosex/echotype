@@ -89,43 +89,6 @@ swift run
 Note: `speech-swift` depends on `mlx.metallib`. After the first local development build, run `scripts/build_mlx_metallib.sh debug` once.
 If your system currently uses only Command Line Tools, install the full Xcode app first, then run `xcodebuild -downloadComponent MetalToolchain`.
 
-## Release Packaging
-
-Manual packaging:
-
-```bash
-scripts/package.sh \
-  --version 1.0.0 \
-  --app-name EchoType \
-  --binary-name echotype \
-  --bundle-id com.smoose.echotype
-```
-
-Upload to GitHub Releases locally (recommended to avoid differences in cloud build environments):
-
-```bash
-scripts/release.sh \
-  --version 1.0.0 \
-  --repo smoosex/echotype \
-  --tap-repo smoosex/homebrew-tap
-```
-
-Notes:
-
-- The script reads local artifacts from `dist/` and uploads them to the GitHub Release for the matching tag
-- It also generates `dist/echotype.rb` from the local DMG and uploads it
-- `--tap-repo` is optional. If omitted, only Release assets are uploaded and the Homebrew tap is not updated
-- If `--tap-repo` is provided, the script syncs via SSH using `git@github.com:<owner>/<repo>.git`, so make sure your GitHub SSH key is configured first
-
-## Maintainer Test Environment
-
-The current release workflow is validated on the maintainer's local machine. Verified environment:
-
-- macOS Tahoe 26.3
-- Apple Silicon (`arm64`)
-- Xcode 26.3 + Metal Toolchain
-- Homebrew (used for cask install/validation)
-
 ## Complete Uninstall
 
 ```bash
