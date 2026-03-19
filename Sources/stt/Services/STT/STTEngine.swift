@@ -248,7 +248,22 @@ actor WhisperKitRuntimeStore {
         scheduleIdleUnload(modelTitle: modelTitle, generation: idleGeneration)
     }
 
+    func resumeIdleUnloadIfNeeded() {
+        guard activeUseCount == 0,
+              cachedKey != nil,
+              idleUnloadTask == nil
+        else {
+            return
+        }
+        idleGeneration &+= 1
+        scheduleIdleUnload(modelTitle: cachedKey!.model.title, generation: idleGeneration)
+    }
+
     private func scheduleIdleUnload(modelTitle: String, generation: UInt64) {
+        let defaults = UserDefaults.standard
+        let autoUnload = defaults.object(forKey: "app.preferences.autoUnloadIdleModel") as? Bool ?? true
+        guard autoUnload else { return }
+
         cancelIdleUnload(reason: nil)
         let delaySeconds = Int(Self.idleUnloadDelay.components.seconds)
         AppLogger.stt.info("WhisperKit idle unload scheduled for \(modelTitle, privacy: .public) in \(delaySeconds, privacy: .public)s")
@@ -273,6 +288,13 @@ actor WhisperKitRuntimeStore {
     }
 
     private func performIdleUnloadIfNeeded(expectedGeneration: UInt64) async {
+        let defaults = UserDefaults.standard
+        let autoUnload = defaults.object(forKey: "app.preferences.autoUnloadIdleModel") as? Bool ?? true
+        guard autoUnload else {
+            idleUnloadTask = nil
+            return
+        }
+
         guard idleGeneration == expectedGeneration,
               activeUseCount == 0,
               loadingTasks.isEmpty,
@@ -472,7 +494,22 @@ actor Qwen3ASRRuntimeStore {
         scheduleIdleUnload(modelTitle: modelTitle, generation: idleGeneration)
     }
 
+    func resumeIdleUnloadIfNeeded() {
+        guard activeUseCount == 0,
+              cachedModel != nil,
+              idleUnloadTask == nil
+        else {
+            return
+        }
+        idleGeneration &+= 1
+        scheduleIdleUnload(modelTitle: cachedModel!.title, generation: idleGeneration)
+    }
+
     private func scheduleIdleUnload(modelTitle: String, generation: UInt64) {
+        let defaults = UserDefaults.standard
+        let autoUnload = defaults.object(forKey: "app.preferences.autoUnloadIdleModel") as? Bool ?? true
+        guard autoUnload else { return }
+
         cancelIdleUnload(reason: nil)
         let delaySeconds = Int(Self.idleUnloadDelay.components.seconds)
         AppLogger.stt.info("Qwen3-ASR idle unload scheduled for \(modelTitle, privacy: .public) in \(delaySeconds, privacy: .public)s")
@@ -497,6 +534,13 @@ actor Qwen3ASRRuntimeStore {
     }
 
     private func performIdleUnloadIfNeeded(expectedGeneration: UInt64) async {
+        let defaults = UserDefaults.standard
+        let autoUnload = defaults.object(forKey: "app.preferences.autoUnloadIdleModel") as? Bool ?? true
+        guard autoUnload else {
+            idleUnloadTask = nil
+            return
+        }
+
         guard idleGeneration == expectedGeneration,
               activeUseCount == 0,
               loadingTasks.isEmpty,

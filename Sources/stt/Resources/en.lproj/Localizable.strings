@@ -44,6 +44,10 @@
 "settings.delete_model_title_format" = "Delete %@?";
 "settings.delete_model_message_format" = "You will need to download this model again before using it.";
 
+"settings.section.model_memory" = "Model Memory";
+"settings.auto_unload_idle_model" = "Auto-unload idle model";
+"settings.auto_unload_idle_model_help" = "Automatically unload the model after 5 minutes of inactivity to free up memory.";
+
 "permission.microphone" = "Microphone";
 "permission.accessibility" = "Accessibility";
 "permission.request" = "Request";

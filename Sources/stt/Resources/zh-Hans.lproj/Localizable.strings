@@ -44,6 +44,10 @@
 "settings.delete_model_title_format" = "删除 %@？";
 "settings.delete_model_message_format" = "删除后需要重新下载才能使用该模型。";
 
+"settings.section.model_memory" = "模型内存";
+"settings.auto_unload_idle_model" = "空闲自动卸载模型";
+"settings.auto_unload_idle_model_help" = "模型空闲 5 分钟后自动卸载以释放内存。";
+
 "permission.microphone" = "麦克风";
 "permission.accessibility" = "辅助功能";
 "permission.request" = "请求";

@@ -194,6 +194,21 @@ struct SettingsView: View {
                 .id("settings.injection_mode.\(uiLanguage.rawValue)")
             }
 
+            Section(L10n.text(L10nKey.settingsSectionModelMemory, language: uiLanguage)) {
+                Toggle(
+                    L10n.text(L10nKey.settingsAutoUnloadIdleModel, language: uiLanguage),
+                    isOn: $preferencesStore.autoUnloadIdleModel
+                )
+                .onChange(of: preferencesStore.autoUnloadIdleModel) { _, newValue in
+                    if newValue {
+                        STTService.resumeIdleUnloadIfNeeded()
+                    }
+                }
+                Text(L10n.text(L10nKey.settingsAutoUnloadIdleModelHelp, language: uiLanguage))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section(L10n.text(L10nKey.settingsSectionPermissions, language: uiLanguage)) {
                 PermissionStatusRow(
                     appLanguage: uiLanguage,

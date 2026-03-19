@@ -47,6 +47,10 @@ enum L10nKey {
     static let settingsDeleteModelTitleFormat = "settings.delete_model_title_format"
     static let settingsDeleteModelMessageFormat = "settings.delete_model_message_format"
 
+    static let settingsSectionModelMemory = "settings.section.model_memory"
+    static let settingsAutoUnloadIdleModel = "settings.auto_unload_idle_model"
+    static let settingsAutoUnloadIdleModelHelp = "settings.auto_unload_idle_model_help"
+
     static let permissionMicrophone = "permission.microphone"
     static let permissionAccessibility = "permission.accessibility"
     static let permissionRequest = "permission.request"

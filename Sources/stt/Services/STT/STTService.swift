@@ -19,6 +19,13 @@ final class STTService {
         }
     }
 
+    static func resumeIdleUnloadIfNeeded() {
+        Task {
+            await WhisperKitRuntimeStore.shared.resumeIdleUnloadIfNeeded()
+            await Qwen3ASRRuntimeStore.shared.resumeIdleUnloadIfNeeded()
+        }
+    }
+
     func transcribe(audioURL: URL) async throws -> String {
         let engine = self.engine
         return try await withTimeout(Self.defaultTranscriptionTimeout) {

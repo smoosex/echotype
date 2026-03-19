@@ -14,10 +14,15 @@ final class AppPreferencesStore: ObservableObject {
         didSet { persist() }
     }
 
+    @Published var autoUnloadIdleModel: Bool {
+        didSet { persist() }
+    }
+
     private enum Keys {
         static let injectionMode = "app.preferences.injectionMode"
         static let appLanguage = "app.preferences.language"
         static let hotkeyEnabled = "app.preferences.hotkey.enabled"
+        static let autoUnloadIdleModel = "app.preferences.autoUnloadIdleModel"
     }
 
     private let defaults: UserDefaults
@@ -33,6 +38,12 @@ final class AppPreferencesStore: ObservableObject {
         } else {
             hotkeyEnabled = defaults.bool(forKey: Keys.hotkeyEnabled)
         }
+
+        if defaults.object(forKey: Keys.autoUnloadIdleModel) == nil {
+            autoUnloadIdleModel = true
+        } else {
+            autoUnloadIdleModel = defaults.bool(forKey: Keys.autoUnloadIdleModel)
+        }
     }
 
     func setHotkeyEnabled(_ enabled: Bool) {
@@ -43,5 +54,6 @@ final class AppPreferencesStore: ObservableObject {
         defaults.set(injectionMode.rawValue, forKey: Keys.injectionMode)
         defaults.set(appLanguage.persistedCode, forKey: Keys.appLanguage)
         defaults.set(hotkeyEnabled, forKey: Keys.hotkeyEnabled)
+        defaults.set(autoUnloadIdleModel, forKey: Keys.autoUnloadIdleModel)
     }
 }
