@@ -1,5 +1,7 @@
 # EchoType
 
+![EchoType Demo](./assets/demo.png)
+
 [English](./README.md) | [中文](./README.zh.md)
 
 EchoType 是一个 macOS 原生离线语音转文字 menubar 应用。

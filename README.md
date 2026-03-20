@@ -1,5 +1,7 @@
 # EchoType
 
+![EchoType Demo](./assets/demo.png)
+
 [English](./README.md) | [中文](./README.zh.md)
 
 EchoType is a native offline speech-to-text menubar app for macOS.
